@@ -160,10 +160,13 @@ export function getNextPhase(currentPhase: string, round: number, crossExAfterRo
 
 export function getNextAgent(debate: Debate): Agent {
   const roles = ['Advocate', 'Skeptic'];
-  const currentRole = debate.turns.length > 0
-    ? debate.turns[debate.turns.length - 1].role
-    : 'Advocate';
 
+  // If no turns yet, Advocate goes first
+  if (debate.turns.length === 0) {
+    return debate.agents.find(a => a.role === 'Advocate') || debate.agents[0];
+  }
+
+  const currentRole = debate.turns[debate.turns.length - 1].role;
   const currentIdx = roles.indexOf(currentRole);
   const nextIdx = (currentIdx + 1) % roles.length;
 

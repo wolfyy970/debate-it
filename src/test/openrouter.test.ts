@@ -1,0 +1,109 @@
+import { describe, it, expect } from 'vitest';
+import { checkApiKeys, formatToolsForProvider, buildSystemPrompt } from '../../server/lib/openrouter';
+
+describe('openrouter', () => {
+  describe('checkApiKeys', () => {
+    it('returns correct key status when no keys are set', () => {
+      const keys = checkApiKeys();
+      expect(keys.openrouter).toBe(false);
+      expect(keys.kimi).toBe(false);
+      expect(keys.hasAny).toBe(false);
+    });
+  });
+
+  describe('formatToolsForProvider', () => {
+    it('formats tools for OpenAI-compatible API', () => {
+      const tools = [
+        {
+          name: 'search_web',
+          description: 'Search the web',
+          parameters: {
+            query: { type: 'string' as const, description: 'Search query' },
+            limit: { type: 'number' as const, description: 'Result limit' },
+          },
+          required: ['query'],
+        },
+      ];
+
+      const formatted = formatToolsForProvider(tools);
+
+      expect(formatted).toHaveLength(1);
+      expect(formatted[0].type).toBe('function');
+      expect(formatted[0].function.name).toBe('search_web');
+      expect(formatted[0].function.parameters.type).toBe('object');
+      expect(formatted[0].function.parameters.required).toEqual(['query']);
+      expect(formatted[0].function.parameters.properties.query.type).toBe('string');
+      expect(formatted[0].function.parameters.properties.query.description).toBe('Search query');
+    });
+
+    it('handles enum parameters', () => {
+      const tools = [
+        {
+          name: 'test_tool',
+          description: 'Test tool',
+          parameters: {
+            mode: {
+              type: 'string' as const,
+              description: 'Mode',
+              enum: ['fast', 'slow'],
+            },
+          },
+        },
+      ];
+
+      const formatted = formatToolsForProvider(tools);
+      expect(formatted[0].function.parameters.properties.mode.enum).toEqual(['fast', 'slow']);
+    });
+
+    it('defaults required to all parameter keys', () => {
+      const tools = [
+        {
+          name: 'test_tool',
+          description: 'Test tool',
+          parameters: {
+            a: { type: 'string' as const, description: 'Param A' },
+            b: { type: 'string' as const, description: 'Param B' },
+          },
+        },
+      ];
+
+      const formatted = formatToolsForProvider(tools);
+      expect(formatted[0].function.parameters.required).toEqual(['a', 'b']);
+    });
+  });
+
+  describe('buildSystemPrompt', () => {
+    it('includes role, style, topic, phase, and round', () => {
+      const prompt = buildSystemPrompt('Advocate', 'analytical', 'AI safety', 'Opening', 1);
+
+      expect(prompt).toContain('Advocate');
+      expect(prompt).toContain('analytical');
+      expect(prompt).toContain('AI safety');
+      expect(prompt).toContain('Opening');
+      expect(prompt).toContain('Round 1');
+    });
+
+    it('includes citation rules', () => {
+      const prompt = buildSystemPrompt('Advocate', 'data-driven', 'Test', 'Opening', 1);
+
+      expect(prompt).toContain('CITATION RULES');
+      expect(prompt).toContain('[1]');
+      expect(prompt).toContain('Do not invent citations');
+    });
+
+    it('includes tool usage instructions', () => {
+      const prompt = buildSystemPrompt('Advocate', 'data-driven', 'Test', 'Opening', 1);
+
+      expect(prompt).toContain('search_web');
+      expect(prompt).toContain('read_url');
+    });
+
+    it('specifies word count and format', () => {
+      const prompt = buildSystemPrompt('Advocate', 'data-driven', 'Test', 'Opening', 1);
+
+      expect(prompt).toContain('200-400 words');
+      expect(prompt).toContain('plain text paragraphs');
+      expect(prompt).toContain('no markdown');
+    });
+  });
+});

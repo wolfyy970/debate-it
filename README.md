@@ -33,6 +33,13 @@ cp example.env .env
 | **[DESIGN_SYSTEM.md](DESIGN_SYSTEM.md)** | SPA design tokens, typography, components |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | Technical: routes, modules, data flow |
 
+## Testing
+
+```bash
+npm test          # Run tests once
+npm run test:watch # Run tests in watch mode
+```
+
 ## One-Liner
 
 ```bash

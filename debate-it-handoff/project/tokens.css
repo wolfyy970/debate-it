@@ -1,0 +1,208 @@
+/* ============================================================
+   DEBATER — DESIGN TOKENS
+   Editorial, serif-led. Deep ink on warm paper. One accent (oxblood).
+   ============================================================ */
+
+:root {
+  /* ——— TYPE FAMILIES ——————————————————————————————————— */
+  --font-display: "Source Serif 4", "Source Serif Pro", Georgia, serif;
+  --font-body: "Source Serif 4", "Source Serif Pro", Georgia, serif;
+  --font-ui: "Söhne", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* ——— TYPE SCALE ————————————————————————————————————— */
+  --fs-xs: 11px;
+  --fs-sm: 13px;
+  --fs-base: 15px;
+  --fs-md: 17px;
+  --fs-lg: 20px;
+  --fs-xl: 26px;
+  --fs-2xl: 34px;
+  --fs-3xl: 46px;
+  --fs-4xl: 64px;
+  --fs-5xl: 88px;
+
+  --lh-tight: 1.08;
+  --lh-snug: 1.2;
+  --lh-normal: 1.45;
+  --lh-prose: 1.58;
+
+  --tr-tight: -0.02em;
+  --tr-normal: -0.005em;
+  --tr-wide: 0.06em;
+  --tr-mono: 0.02em;
+
+  /* ——— COLOR — PAPER (LIGHT) ——————————————————————————— */
+  --ink-900: #191511;           /* deep ink, body text */
+  --ink-700: #3a332c;           /* secondary */
+  --ink-500: #6b6258;           /* tertiary / metadata */
+  --ink-300: #a39b90;           /* muted */
+  --ink-200: #cfc8bd;           /* subtle dividers */
+  --ink-100: #e3ddd1;           /* rule lines */
+
+  --paper: #f4efe4;             /* primary bg — warm cream */
+  --paper-2: #ecE6d8;           /* elevated bg */
+  --paper-3: #e4ddc9;           /* inset / code fill */
+  --paper-0: #faf6eb;           /* brightest — cards on paper */
+
+  --accent: #7a1f1f;            /* oxblood — only accent */
+  --accent-soft: #a64040;
+  --accent-bg: #f2e4df;
+  --accent-ink: #f4efe4;        /* ink on accent */
+
+  /* agent voices — derived, barely-chromatic */
+  --advocate: #1e3a5c;          /* navy */
+  --advocate-bg: #dfe4ec;
+  --skeptic: #7a1f1f;            /* oxblood (matches accent) */
+  --skeptic-bg: #f0e1dc;
+  --judge: #4a4438;              /* stone */
+  --judge-bg: #e5dfcf;
+  --factcheck: #3d5a3a;          /* forest */
+  --factcheck-bg: #dde6d7;
+
+  --ok: #3d5a3a;
+  --warn: #8b5a1f;
+  --danger: #7a1f1f;
+
+  /* ——— SPACING ———————————————————————————————————————— */
+  --sp-0: 0;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+  --sp-9: 56px;
+  --sp-10: 72px;
+  --sp-11: 96px;
+
+  /* ——— RADII / BORDERS ———————————————————————————————— */
+  --r-0: 0;
+  --r-1: 2px;
+  --r-2: 4px;
+  --r-3: 8px;
+  --r-pill: 999px;
+
+  --bw-hair: 0.5px;
+  --bw-1: 1px;
+  --bw-2: 2px;
+
+  /* ——— SHADOWS (restrained — editorial) ——————————————— */
+  --sh-none: none;
+  --sh-1: 0 1px 0 rgba(25,21,17,.04), 0 1px 2px rgba(25,21,17,.04);
+  --sh-2: 0 1px 0 rgba(25,21,17,.06), 0 4px 16px rgba(25,21,17,.06);
+  --sh-3: 0 2px 0 rgba(25,21,17,.04), 0 12px 32px rgba(25,21,17,.08);
+
+  /* ——— MOTION ————————————————————————————————————————— */
+  --ease-out: cubic-bezier(.2,.7,.3,1);
+  --ease-in: cubic-bezier(.7,0,.9,.3);
+  --ease-in-out: cubic-bezier(.6,0,.2,1);
+  --dur-1: 120ms;
+  --dur-2: 220ms;
+  --dur-3: 420ms;
+}
+
+/* ——— DARK (INK) ——————————————————————————————————————— */
+[data-theme="dark"] {
+  --ink-900: #f0ebde;
+  --ink-700: #d3ccbd;
+  --ink-500: #968d7e;
+  --ink-300: #6b6458;
+  --ink-200: #403c34;
+  --ink-100: #2d2a24;
+
+  --paper: #16140f;
+  --paper-2: #1d1a15;
+  --paper-3: #24211b;
+  --paper-0: #1a1813;
+
+  --accent: #c97070;
+  --accent-soft: #dea0a0;
+  --accent-bg: #2a1a1a;
+  --accent-ink: #16140f;
+
+  --advocate: #8fb0d4;
+  --advocate-bg: #1a2231;
+  --skeptic: #c97070;
+  --skeptic-bg: #2a1a1a;
+  --judge: #c7bda6;
+  --judge-bg: #252119;
+  --factcheck: #95b590;
+  --factcheck-bg: #1b2319;
+}
+
+/* ———————————————————————————————————————————————————————
+   BASE — resets + paper feel
+   ——————————————————————————————————————————————————————— */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-body);
+  font-size: var(--fs-base);
+  line-height: var(--lh-normal);
+  color: var(--ink-900);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "liga", "kern", "onum";
+}
+
+/* ——— UTILITY TYPE CLASSES —————————————————————————————— */
+.t-display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--fs-4xl);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tr-tight);
+}
+.t-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: var(--fs-2xl);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tr-tight);
+}
+.t-head {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: var(--fs-xl);
+  line-height: var(--lh-snug);
+}
+.t-body {
+  font-family: var(--font-body);
+  font-size: var(--fs-md);
+  line-height: var(--lh-prose);
+}
+.t-ui {
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  letter-spacing: 0;
+}
+.t-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--tr-wide);
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+.t-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  letter-spacing: var(--tr-mono);
+}
+.t-drop::first-letter {
+  font-family: var(--font-display);
+  font-size: 4.4em;
+  line-height: 0.88;
+  float: left;
+  margin: 0.08em 0.08em 0 -0.02em;
+  font-weight: 500;
+  color: var(--ink-900);
+}
+
+/* ——— RULE ——————————————————————————————————————————————— */
+.rule { border: 0; border-top: var(--bw-hair) solid var(--ink-200); margin: 0; }
+.rule-heavy { border-top: var(--bw-1) solid var(--ink-900); }
+.rule-double { border: 0; height: 6px; border-top: var(--bw-1) solid var(--ink-900); border-bottom: var(--bw-hair) solid var(--ink-900); }

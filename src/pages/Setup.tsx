@@ -6,7 +6,6 @@ import {
   Byline,
   Pill,
   Button,
-  Toggle,
   Segmented,
   ModelSelect,
 } from '../components';
@@ -17,11 +16,11 @@ import type {
   DebateMode,
   DebateToggles,
   DebateStructure,
+  CreateDebateRequest,
 } from '../types';
-import {
-  DEBATE_MODES,
-  AGENT_STYLES,
-} from '../types';
+import { getRoleColorToken } from '../theme/roleColors';
+import { DEBATE_MODES, AGENT_STYLES } from '../types';
+import { SetupSidebar } from './SetupSidebar';
 
 interface AgentConfig {
   id: string;
@@ -64,7 +63,7 @@ export function SetupPage() {
   const gridCols = isMobile ? 1 : isTablet ? 2 : 3;
 
   const handleCreateDebate = async () => {
-    const debateData = {
+    const debateData: CreateDebateRequest = {
       topic: topic || 'Should nations implement a four-day workweek as standard policy?',
       mode: selectedMode,
       agents: agents.map(({ role, style, model, provider }) => ({
@@ -105,78 +104,11 @@ export function SetupPage() {
     setAgents(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
   };
 
-  const getAgentColor = (role: AgentRole) => {
-    const colors: Record<AgentRole, string> = {
-      Advocate: 'var(--advocate)',
-      Skeptic: 'var(--skeptic)',
-      Judge: 'var(--judge)',
-      'Fact-checker': 'var(--factcheck)',
-      Moderator: 'var(--ink-700)',
-    };
-    return colors[role];
-  };
-
   const estimateTime = () => {
     const turns = structure.rounds * 2 + 2;
     const minutes = Math.ceil(turns * 0.5);
     return `\u2248 ${minutes}:${String((turns * 30) % 60).padStart(2, '0')} \u00b7 ${turns} turns`;
   };
-
-  // Sidebar content component
-  const Sidebar = () => (
-    <div style={{ 
-      padding: isMobile ? 'var(--pad-y) var(--pad-x)' : '48px 32px',
-      background: isMobile ? 'transparent' : 'var(--paper-2)',
-      borderTop: isMobile ? '1px solid var(--ink-200)' : 'none',
-    }}>
-      <Eyebrow accent>Quick Toggles</Eyebrow>
-      <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <Toggle
-          on={toggles.factChecking}
-          label="Fact-checking"
-          hint="Flag unsupported or weakly-evidenced claims."
-          onChange={(on) => setToggles({ ...toggles, factChecking: on })}
-        />
-        <Toggle
-          on={toggles.forceSteelmanning}
-          label="Force steelmanning"
-          hint="Require the strongest version of each claim before rebuttal."
-          onChange={(on) => setToggles({ ...toggles, forceSteelmanning: on })}
-        />
-        <Toggle
-          on={toggles.requireVerdict}
-          label="Require final verdict"
-          hint="Judge must issue a recommendation."
-          onChange={(on) => setToggles({ ...toggles, requireVerdict: on })}
-        />
-        <Toggle
-          on={toggles.scoring}
-          label="Argument scoring"
-          hint="Score each turn on rigor, evidence, and novelty."
-          onChange={(on) => setToggles({ ...toggles, scoring: on })}
-        />
-      </div>
-
-      <div className="rule" style={{ margin: '32px 0' }} />
-
-      <Eyebrow accent>Structure</Eyebrow>
-      <div style={{ marginTop: 20 }}>
-        <Field label="Rounds" value={String(structure.rounds)} />
-        <Field label="Turn cap" value={`~${structure.turnCap} tokens`} />
-        <Field label="Cross-Examination" value={`After round ${structure.crossExAfterRound}`} />
-        <Field label="Synthesis" value={structure.synthesisType === 'judge+system' ? 'Judge + system' : 'Judge only'} />
-      </div>
-
-      <div style={{ marginTop: 40 }}>
-        <Button variant="primary" size="lg" full onClick={handleCreateDebate}>
-          Begin Debate \u2192
-        </Button>
-        <div className="t-mono" style={{ fontSize: 11, color: 'var(--ink-500)', textAlign: 'center', marginTop: 10 }}>
-          {estimateTime()}
-        </div>
-      </div>
-    </div>
-  );
 
   return (
     <div style={{
@@ -294,7 +226,7 @@ export function SetupPage() {
                   }}
                 >
                   <div style={{
-                    borderTop: `3px solid ${getAgentColor(agent.role)}`,
+                    borderTop: `3px solid ${getRoleColorToken(agent.role)}`,
                     padding: '16px 18px',
                     borderBottom: '1px solid var(--ink-200)',
                   }}>
@@ -305,7 +237,7 @@ export function SetupPage() {
                     <ModelSelect
                       value={agent.model}
                       provider={agent.provider}
-                      color={getAgentColor(agent.role)}
+                      color={getRoleColorToken(agent.role)}
                       open={openModelSelect === agent.id}
                       onToggle={() => setOpenModelSelect(openModelSelect === agent.id ? null : agent.id)}
                       onSelect={(model, provider) => {
@@ -341,26 +273,28 @@ export function SetupPage() {
         </div>
 
         {/* Sidebar - below on mobile, right on desktop */}
-        {isMobile ? <Sidebar /> : (
+        {isMobile ? (
+          <SetupSidebar
+            isMobile={isMobile}
+            toggles={toggles}
+            setToggles={setToggles}
+            structure={structure}
+            estimateTime={estimateTime}
+            onBeginDebate={handleCreateDebate}
+          />
+        ) : (
           <aside style={{ background: 'var(--paper-2)' }}>
-            <Sidebar />
+            <SetupSidebar
+              isMobile={isMobile}
+              toggles={toggles}
+              setToggles={setToggles}
+              structure={structure}
+              estimateTime={estimateTime}
+              onBeginDebate={handleCreateDebate}
+            />
           </aside>
         )}
       </div>
-    </div>
-  );
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'space-between',
-      padding: '10px 0',
-      borderBottom: '1px solid var(--ink-100)',
-    }}>
-      <span className="t-ui" style={{ fontSize: 13, color: 'var(--ink-500)' }}>{label}</span>
-      <span className="t-mono" style={{ fontSize: 12, color: 'var(--ink-900)' }}>{value}</span>
     </div>
   );
 }

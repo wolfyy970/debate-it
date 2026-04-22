@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -62,6 +63,7 @@ export interface Debate {
   structure: {
     rounds: number;
     turnCap: number;
+    /** Advisory in UI; phase engine uses fixed Opening/Cross-Ex lengths until wired. */
     crossExAfterRound: number;
     synthesisType: 'judge' | 'judge+system';
   };
@@ -80,35 +82,79 @@ export interface Debate {
 
 class DebateStore {
   private debates: Map<string, Debate> = new Map();
-  private initialized = false;
+  private saveChain: Promise<void> = Promise.resolve();
+  private lastLoadError: string | null = null;
 
   constructor() {
     this.loadFromDisk();
   }
 
+  /** Non-fatal load/persist issues (e.g. corrupt debates.json). */
+  getLastLoadError(): string | null {
+    return this.lastLoadError;
+  }
+
   private loadFromDisk(): void {
+    this.lastLoadError = null;
     try {
       if (fs.existsSync(DATA_FILE)) {
         const data = fs.readFileSync(DATA_FILE, 'utf-8');
-        const debatesArray: Debate[] = JSON.parse(data);
-        debatesArray.forEach(debate => {
+        if (data.trim() === '') {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(data);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          this.lastLoadError = `Invalid debates JSON: ${msg}`;
+          console.error(this.lastLoadError);
+          return;
+        }
+        if (!Array.isArray(parsed)) {
+          this.lastLoadError = 'debates.json must contain a JSON array';
+          console.error(this.lastLoadError);
+          return;
+        }
+        const debatesArray = parsed.filter(isDebateShape);
+        debatesArray.forEach((debate) => {
           this.debates.set(debate.id, debate);
         });
         console.log(`Loaded ${debatesArray.length} debates from disk`);
       }
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.lastLoadError = msg;
       console.error('Error loading debates from disk:', error);
     }
-    this.initialized = true;
   }
 
-  private saveToDisk(): void {
+  private saveToDiskAtomic(): void {
+    const debatesArray = Array.from(this.debates.values());
+    const payload = JSON.stringify(debatesArray, null, 2);
+    const tmpPath = `${DATA_FILE}.${process.pid}.${randomUUID()}.tmp`;
     try {
-      const debatesArray = Array.from(this.debates.values());
-      fs.writeFileSync(DATA_FILE, JSON.stringify(debatesArray, null, 2));
+      fs.writeFileSync(tmpPath, payload, 'utf-8');
+      fs.renameSync(tmpPath, DATA_FILE);
     } catch (error) {
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+      } catch {
+        /* ignore */
+      }
       console.error('Error saving debates to disk:', error);
+      throw error;
     }
+  }
+
+  private scheduleSave(): void {
+    this.saveChain = this.saveChain
+      .then(() => {
+        this.saveToDiskAtomic();
+      })
+      .catch((err) => {
+        console.error('Persist chain error:', err);
+      });
   }
 
   get(id: string): Debate | undefined {
@@ -117,7 +163,7 @@ class DebateStore {
 
   set(id: string, debate: Debate): void {
     this.debates.set(id, debate);
-    this.saveToDisk();
+    this.scheduleSave();
   }
 
   getAll(): Debate[] {
@@ -127,10 +173,42 @@ class DebateStore {
   delete(id: string): boolean {
     const result = this.debates.delete(id);
     if (result) {
-      this.saveToDisk();
+      this.scheduleSave();
     }
     return result;
   }
+
+  /** Await queued disk writes (tests / shutdown hooks). */
+  flushPendingWrites(): Promise<void> {
+    return this.saveChain;
+  }
+}
+
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === 'string' && v.length > 0;
+}
+
+/** Runtime guard for persisted debates (rejects malformed JSON without crashing). */
+export function parseDebatesJson(raw: string): Debate[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(isDebateShape);
+}
+
+function isDebateShape(v: unknown): v is Debate {
+  if (!v || typeof v !== 'object') return false;
+  const o = v as Record<string, unknown>;
+  return (
+    isNonEmptyString(o.id) &&
+    isNonEmptyString(o.topic) &&
+    Array.isArray(o.turns) &&
+    Array.isArray(o.agents)
+  );
 }
 
 const store = new DebateStore();
@@ -139,39 +217,9 @@ export function getDebateStore(): DebateStore {
   return store;
 }
 
-export function generateId(): string {
-  return Math.random().toString(36).substring(2, 10) + Date.now().toString(36).substring(2, 6);
-}
-
-export function getNextPhase(currentPhase: string, round: number, crossExAfterRound: number): string {
-  const phases = ['Opening', 'Cross-Ex', 'Rebuttal', 'Final', 'Synthesis'];
-  const idx = phases.indexOf(currentPhase);
-
-  if (currentPhase === 'Opening') return 'Cross-Ex';
-  if (currentPhase === 'Cross-Ex') return 'Rebuttal';
-  if (currentPhase === 'Rebuttal' && round < 4) {
-    return 'Opening';
-  }
-  if (currentPhase === 'Rebuttal' && round >= 4) return 'Final';
-  if (currentPhase === 'Final') return 'Synthesis';
-
-  return phases[idx + 1] || 'Synthesis';
-}
-
-export function getNextAgent(debate: Debate): Agent {
-  const roles = ['Advocate', 'Skeptic'];
-
-  // If no turns yet, Advocate goes first
-  if (debate.turns.length === 0) {
-    return debate.agents.find(a => a.role === 'Advocate') || debate.agents[0];
-  }
-
-  const currentRole = debate.turns[debate.turns.length - 1].role;
-  const currentIdx = roles.indexOf(currentRole);
-  const nextIdx = (currentIdx + 1) % roles.length;
-
-  const nextRole = roles[nextIdx] as Agent['role'];
-  return debate.agents.find(a => a.role === nextRole) || debate.agents[0];
+/** Stable prefixed IDs for debates, turns, agents, and queue jobs. */
+export function generateId(kind = 'id'): string {
+  return `${kind}-${randomUUID()}`;
 }
 
 export function createDebateInstance(data: {
@@ -181,9 +229,9 @@ export function createDebateInstance(data: {
   toggles: Debate['toggles'];
   structure: Debate['structure'];
 }): Debate {
-  const id = generateId();
+  const id = generateId('debate');
   const agents: Agent[] = data.agents.map((a) => ({
-    id: generateId(),
+    id: generateId('agent'),
     role: a.role as Agent['role'],
     style: a.style,
     model: a.model,
@@ -192,7 +240,7 @@ export function createDebateInstance(data: {
 
   // Create initial "Topic" turn so the debate prompt is visible
   const topicTurn: Turn = {
-    id: generateId(),
+    id: generateId('turn'),
     n: 1,
     role: 'Moderator',
     phase: 'Opening',

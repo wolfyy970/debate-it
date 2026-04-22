@@ -79,6 +79,7 @@ describe('tools', () => {
       expect(result.toolName).toBe('search_web');
       expect(result.toolCallId).toBe('test_4');
       expect(result.isError).toBe(false);
+      expect(Array.isArray(result.sources)).toBe(true);
     });
   });
 });

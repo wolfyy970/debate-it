@@ -117,6 +117,8 @@ cat .env
 curl http://localhost:3001/health
 ```
 
+The JSON response includes `persistence.loadError`. If that field is non-null, the server started but the debates file failed to load (see **Data not persisting** below); new debates may still be created, but existing data could be missing until the file is repaired.
+
 ### Agents generate empty responses
 
 - Check `TAVILY_API_KEY` is set (search works better with it)

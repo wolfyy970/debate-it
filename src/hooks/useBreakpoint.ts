@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-export type Breakpoint = 'mobile' | 'tablet' | 'desktop';
+type Breakpoint = 'mobile' | 'tablet' | 'desktop';
 
 const MOBILE_MAX = 640;
 const TABLET_MAX = 1024;

@@ -1,4 +1,4 @@
-import { getEncoding } from 'js-tiktoken';
+import { getEncoding, type TiktokenEncoding } from 'js-tiktoken';
 
 // Map model IDs to tiktoken encodings
 // cl100k_base covers GPT-4, GPT-3.5, Claude, and most modern models
@@ -65,7 +65,7 @@ const encoders = new Map<string, ReturnType<typeof getEncoding>>();
 
 function getEncoder(encodingName: string): ReturnType<typeof getEncoding> {
   if (!encoders.has(encodingName)) {
-    encoders.set(encodingName, getEncoding(encodingName));
+    encoders.set(encodingName, getEncoding(encodingName as TiktokenEncoding));
   }
   return encoders.get(encodingName)!;
 }
@@ -83,15 +83,3 @@ export function countTokens(text: string, model: string): number {
   }
 }
 
-export function countMessagesTokens(
-  messages: { role: string; content: string }[],
-  model: string
-): number {
-  let total = 0;
-  for (const message of messages) {
-    total += countTokens(message.content, model);
-    // Add overhead for role formatting (~4 tokens per message)
-    total += 4;
-  }
-  return total;
-}

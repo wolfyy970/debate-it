@@ -1,3 +1,5 @@
+import { TAVILY_FETCH_TIMEOUT_MS } from './constants';
+
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
 
 export interface SearchResult {
@@ -25,6 +27,7 @@ export async function searchWeb(query: string, maxResults: number = 5): Promise<
       headers: {
         'Content-Type': 'application/json',
       },
+      signal: AbortSignal.timeout(TAVILY_FETCH_TIMEOUT_MS),
       body: JSON.stringify({
         api_key: TAVILY_API_KEY,
         query,

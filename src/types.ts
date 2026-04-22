@@ -1,3 +1,6 @@
+import type { Source } from '../shared/domain';
+export type { Source };
+
 export type AgentRole = 'Advocate' | 'Skeptic' | 'Judge' | 'Fact-checker' | 'Moderator';
 export type AgentStyle = 'analytical' | 'emotional' | 'data-driven' | 'philosophical';
 export type DebateMode = 'balanced' | 'adversarial' | 'decision' | 'educational' | 'devils-advocate';
@@ -11,12 +14,6 @@ export interface Agent {
   provider: string;
 }
 
-export interface Source {
-  title: string;
-  url: string;
-  snippet?: string;
-}
-
 export interface Turn {
   id: string;
   n: number;
@@ -27,7 +24,8 @@ export interface Turn {
   text: string;
   reasoning?: string;
   sources?: Source[];
-  timestamp: Date;
+  /** ISO string from API / SSE (JSON has no Date type). */
+  timestamp: string;
   isModerator?: boolean;
   flagged?: boolean;
   strong?: string[];
@@ -59,6 +57,10 @@ export interface DebateToggles {
 export interface DebateStructure {
   rounds: number;
   turnCap: number;
+  /**
+   * Shown in setup UI as “after round N”. Phase math in `server/lib/debate-phase.ts` currently
+   * uses fixed Opening/Cross-Ex lengths (2 + 4 turns per macro-round); this field is advisory until wired.
+   */
   crossExAfterRound: number;
   synthesisType: 'judge' | 'judge+system';
 }

@@ -41,7 +41,7 @@ describe('validation middleware', () => {
 
       expect(jsonResponse).toBeDefined();
       expect(jsonResponse.error).toBe('Validation Error');
-      expect(jsonResponse.messages).toContain('topic is required');
+      expect(jsonResponse.message).toContain('topic is required');
     });
 
     it('fails when string exceeds maxLength', () => {
@@ -52,18 +52,16 @@ describe('validation middleware', () => {
       let jsonResponse: any;
       const req = { body: { topic: 'This is way too long' } } as any;
       const res = {
-        status: (code: number) => {
-          return {
-            json: (data: any) => {
-              jsonResponse = data;
-            },
-          };
-        },
+        status: () => ({
+          json: (data: any) => {
+            jsonResponse = data;
+          },
+        }),
       } as any;
 
       middleware(req, res, () => {});
 
-      expect(jsonResponse.messages).toContain('topic must be at most 10 characters');
+      expect(jsonResponse.message).toContain('topic must be at most 10 characters');
     });
 
     it('fails when type is incorrect', () => {
@@ -83,7 +81,7 @@ describe('validation middleware', () => {
 
       middleware(req, res, () => {});
 
-      expect(jsonResponse.messages).toContain('count must be a number');
+      expect(jsonResponse.message).toContain('count must be a number');
     });
 
     it('validates enum values', () => {
@@ -103,7 +101,7 @@ describe('validation middleware', () => {
 
       middleware(req, res, () => {});
 
-      expect(jsonResponse.messages[0]).toContain('must be one of');
+      expect(jsonResponse.message).toContain('must be one of');
     });
   });
 
@@ -144,13 +142,11 @@ describe('validation middleware', () => {
       let jsonResponse: any;
       const req = { params: {} } as any;
       const res = {
-        status: (code: number) => {
-          return {
-            json: (data: any) => {
-              jsonResponse = data;
-            },
-          };
-        },
+        status: () => ({
+          json: (data: any) => {
+            jsonResponse = data;
+          },
+        }),
       } as any;
 
       validateId(req, res, () => {});

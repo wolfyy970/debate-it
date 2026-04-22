@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { searchWeb, formatSearchResults } from '../../server/lib/search';
+import { formatSearchResults } from '../../server/lib/search';
 
 describe('search', () => {
   describe('formatSearchResults', () => {

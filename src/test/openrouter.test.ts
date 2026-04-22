@@ -1,6 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { checkApiKeys, formatToolsForProvider, buildSystemPrompt } from '../../server/lib/openrouter';
 
+/** Narrowed shape returned by `formatToolsForProvider` for tests. */
+type FormattedTool = {
+  type: string;
+  function: {
+    name: string;
+    parameters: {
+      type: string;
+      required: string[];
+      properties: Record<string, { type?: string; description?: string; enum?: string[] }>;
+    };
+  };
+};
+
 describe('openrouter', () => {
   describe('checkApiKeys', () => {
     it('returns correct key status when no keys are set', () => {
@@ -26,14 +39,15 @@ describe('openrouter', () => {
       ];
 
       const formatted = formatToolsForProvider(tools);
+      const row = formatted[0] as FormattedTool;
 
       expect(formatted).toHaveLength(1);
-      expect(formatted[0].type).toBe('function');
-      expect(formatted[0].function.name).toBe('search_web');
-      expect(formatted[0].function.parameters.type).toBe('object');
-      expect(formatted[0].function.parameters.required).toEqual(['query']);
-      expect(formatted[0].function.parameters.properties.query.type).toBe('string');
-      expect(formatted[0].function.parameters.properties.query.description).toBe('Search query');
+      expect(row.type).toBe('function');
+      expect(row.function.name).toBe('search_web');
+      expect(row.function.parameters.type).toBe('object');
+      expect(row.function.parameters.required).toEqual(['query']);
+      expect(row.function.parameters.properties.query.type).toBe('string');
+      expect(row.function.parameters.properties.query.description).toBe('Search query');
     });
 
     it('handles enum parameters', () => {
@@ -52,7 +66,8 @@ describe('openrouter', () => {
       ];
 
       const formatted = formatToolsForProvider(tools);
-      expect(formatted[0].function.parameters.properties.mode.enum).toEqual(['fast', 'slow']);
+      const row = formatted[0] as FormattedTool;
+      expect(row.function.parameters.properties.mode.enum).toEqual(['fast', 'slow']);
     });
 
     it('defaults required to all parameter keys', () => {
@@ -68,7 +83,8 @@ describe('openrouter', () => {
       ];
 
       const formatted = formatToolsForProvider(tools);
-      expect(formatted[0].function.parameters.required).toEqual(['a', 'b']);
+      const row = formatted[0] as FormattedTool;
+      expect(row.function.parameters.required).toEqual(['a', 'b']);
     });
   });
 

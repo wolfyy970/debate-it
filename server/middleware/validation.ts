@@ -1,4 +1,5 @@
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
+import { sendApiError } from '../lib/http-errors.js';
 
 interface ValidationRule {
   field: string;
@@ -64,26 +65,25 @@ export function validate(rules: ValidationRule[]) {
     }
 
     if (errors.length > 0) {
-      return res.status(400).json({
-        error: 'Validation Error',
-        messages: errors,
-        timestamp: new Date().toISOString(),
-      });
+      return sendApiError(res, 400, 'Validation Error', errors.join('; '));
     }
 
     next();
   };
 }
 
+/** Express 5 may type `req.params.id` as `string | string[]`. */
+export function getRouteParamId(req: Request): string | undefined {
+  const raw = req.params.id;
+  const id = Array.isArray(raw) ? raw[0] : raw;
+  return typeof id === 'string' ? id : undefined;
+}
+
 export function validateId(req: Request, res: Response, next: NextFunction) {
-  const { id } = req.params;
+  const id = getRouteParamId(req);
 
   if (!id || id.length < 4) {
-    return res.status(400).json({
-      error: 'Validation Error',
-      message: 'Invalid debate ID',
-      timestamp: new Date().toISOString(),
-    });
+    return sendApiError(res, 400, 'Validation Error', 'Invalid debate ID');
   }
 
   next();

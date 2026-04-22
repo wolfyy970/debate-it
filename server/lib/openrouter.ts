@@ -1,22 +1,16 @@
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const KIMI_API_KEY = process.env.KIMI_API_KEY || '';
 
-import type { ToolDefinition, ToolCall, ToolResult } from './tools';
+import type { ToolDefinition, ToolCall } from './tools';
+import {
+  GENERATE_RESPONSE_TIMEOUT_MS,
+  LLM_STREAM_TIMEOUT_MS,
+} from './constants';
+import { streamEventsFromOpenAiSseResponse } from './chat-completion-sse';
 
-interface Message {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
-  tool_calls?: ToolCall[];
-  tool_call_id?: string;
-  name?: string;
-}
+import type { Message, StreamEvent } from './llm-types';
 
-export interface StreamEvent {
-  type: 'text_delta' | 'tool_call_start' | 'tool_call_delta' | 'tool_call_end' | 'reasoning' | 'done' | 'error';
-  data?: string;
-  toolCall?: ToolCall;
-  stopReason?: string;
-}
+export type { Message, StreamEvent } from './llm-types';
 
 function isKimiModel(model: string): boolean {
   return model.toLowerCase().includes('kimi') || model.toLowerCase().includes('moonshot');
@@ -34,55 +28,105 @@ export function checkApiKeys(): { openrouter: boolean; kimi: boolean; hasAny: bo
   };
 }
 
-export function formatToolsForProvider(tools: ToolDefinition[]): any[] {
-  return tools.map(tool => ({
+export function formatToolsForProvider(tools: ToolDefinition[]): Record<string, unknown>[] {
+  return tools.map((tool) => ({
     type: 'function',
     function: {
       name: tool.name,
       description: tool.description,
       parameters: {
         type: 'object',
-        properties: Object.entries(tool.parameters).reduce((acc, [key, param]) => {
-          acc[key] = {
-            type: param.type,
-            description: param.description,
-            ...(param.enum ? { enum: param.enum } : {}),
-          };
-          return acc;
-        }, {} as Record<string, any>),
+        properties: Object.entries(tool.parameters).reduce(
+          (acc, [key, param]) => {
+            acc[key] = {
+              type: param.type,
+              description: param.description,
+              ...(param.enum ? { enum: param.enum } : {}),
+            };
+            return acc;
+          },
+          {} as Record<string, unknown>
+        ),
         required: tool.required || Object.keys(tool.parameters),
       },
     },
   }));
 }
 
+function mapMessagesToOpenAiChat(messages: Message[]): Record<string, unknown>[] {
+  return messages.map((m) => {
+    if (m.role === 'tool') {
+      return {
+        role: 'tool',
+        content: m.content,
+        tool_call_id: m.tool_call_id,
+      };
+    }
+    if (m.role === 'assistant' && m.tool_calls) {
+      return {
+        role: 'assistant',
+        content: m.content,
+        tool_calls: m.tool_calls.map((tc: ToolCall) => ({
+          id: tc.id,
+          type: 'function',
+          function: {
+            name: tc.name,
+            arguments: JSON.stringify(tc.arguments),
+          },
+        })),
+      };
+    }
+    return {
+      role: m.role,
+      content: m.content,
+    };
+  });
+}
+
+function buildStreamingRequestBody(
+  _model: string,
+  messages: Message[],
+  tools: ToolDefinition[] | undefined,
+  modelForApi: string
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model: modelForApi,
+    messages: mapMessagesToOpenAiChat(messages),
+    stream: true,
+  };
+  if (tools && tools.length > 0) {
+    body.tools = formatToolsForProvider(tools);
+    body.tool_choice = 'auto';
+  }
+  return body;
+}
+
 /**
  * Stream a response from the LLM with tool support.
- * 
- * This is the core streaming function. It yields events:
- * - text_delta: Regular text tokens
- * - tool_call_start: LLM started emitting a tool call
- * - tool_call_delta: More arguments for the tool call
- * - tool_call_end: Tool call is complete
- * - reasoning: Thinking/reasoning tokens (if model supports it)
- * - done: Stream complete (includes stopReason)
  */
+function composeStreamSignal(streamSignal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(LLM_STREAM_TIMEOUT_MS);
+  return streamSignal != null ? AbortSignal.any([streamSignal, timeout]) : timeout;
+}
+
 export async function* streamWithTools(
   model: string,
   messages: Message[],
-  tools?: ToolDefinition[]
+  tools?: ToolDefinition[],
+  streamSignal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
   if (!hasApiKey()) {
     throw new Error('No API keys configured. Set OPENROUTER_API_KEY or KIMI_API_KEY.');
   }
 
-  // Route to appropriate provider
+  const signal = composeStreamSignal(streamSignal);
+
   if (isKimiModel(model) && KIMI_API_KEY) {
-    yield* streamKimiWithTools(model, messages, tools);
+    yield* streamKimiWithTools(model, messages, tools, signal);
   } else if (OPENROUTER_API_KEY) {
-    yield* streamOpenRouterWithTools(model, messages, tools);
+    yield* streamOpenRouterWithTools(model, messages, tools, signal);
   } else if (KIMI_API_KEY) {
-    yield* streamKimiWithTools(model, messages, tools);
+    yield* streamKimiWithTools(model, messages, tools, signal);
   } else {
     throw new Error('No API keys configured. Set OPENROUTER_API_KEY or KIMI_API_KEY.');
   }
@@ -91,56 +135,21 @@ export async function* streamWithTools(
 async function* streamOpenRouterWithTools(
   model: string,
   messages: Message[],
-  tools?: ToolDefinition[]
+  tools: ToolDefinition[] | undefined,
+  signal: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
-  const body: any = {
-    model,
-    messages: messages.map(m => {
-      // Transform tool messages to OpenAI format
-      if (m.role === 'tool') {
-        return {
-          role: 'tool',
-          content: m.content,
-          tool_call_id: m.tool_call_id,
-        };
-      }
-      // Transform assistant messages with tool calls
-      if (m.role === 'assistant' && m.tool_calls) {
-        return {
-          role: 'assistant',
-          content: m.content,
-          tool_calls: m.tool_calls.map(tc => ({
-            id: tc.id,
-            type: 'function',
-            function: {
-              name: tc.name,
-              arguments: JSON.stringify(tc.arguments),
-            },
-          })),
-        };
-      }
-      return {
-        role: m.role,
-        content: m.content,
-      };
-    }),
-    stream: true,
-  };
-
-  if (tools && tools.length > 0) {
-    body.tools = formatToolsForProvider(tools);
-    body.tool_choice = 'auto';
-  }
+  const body = buildStreamingRequestBody(model, messages, tools, model);
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
       'HTTP-Referer': 'http://localhost:5173',
       'X-Title': 'Debater',
     },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!response.ok) {
@@ -148,180 +157,26 @@ async function* streamOpenRouterWithTools(
     throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
   }
 
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('No response body');
-
-  const decoder = new TextDecoder();
-  let currentToolCalls: Map<number, ToolCall> = new Map();
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        
-        const data = line.slice(6);
-        if (data === '[DONE]') continue;
-
-        try {
-          const parsed = JSON.parse(data);
-          const delta = parsed.choices?.[0]?.delta;
-          const finishReason = parsed.choices?.[0]?.finish_reason;
-
-          // Handle tool calls
-          if (delta?.tool_calls) {
-            for (const toolDelta of delta.tool_calls) {
-              const index = toolDelta.index;
-              
-              if (!currentToolCalls.has(index)) {
-                // New tool call starting
-                const newToolCall: ToolCall = {
-                  id: toolDelta.id || `call_${Date.now()}_${index}`,
-                  name: toolDelta.function?.name || '',
-                  arguments: {},
-                };
-                currentToolCalls.set(index, newToolCall);
-                
-                yield {
-                  type: 'tool_call_start',
-                  toolCall: newToolCall,
-                };
-              }
-              
-              const existingCall = currentToolCalls.get(index)!;
-              
-              // Accumulate arguments
-              if (toolDelta.function?.arguments) {
-                try {
-                  const args = JSON.parse(toolDelta.function.arguments);
-                  existingCall.arguments = { ...existingCall.arguments, ...args };
-                } catch {
-                  // Partial JSON, accumulate as string and try later
-                  // For now, store the raw string
-                  const currentArgs = existingCall.arguments._raw || '';
-                  existingCall.arguments = { 
-                    ...existingCall.arguments, 
-                    _raw: currentArgs + toolDelta.function.arguments 
-                  };
-                }
-              }
-              
-              if (toolDelta.function?.name) {
-                existingCall.name = toolDelta.function.name;
-              }
-              
-              yield {
-                type: 'tool_call_delta',
-                toolCall: existingCall,
-              };
-            }
-          }
-
-          // Handle text content
-          if (delta?.content) {
-            yield { type: 'text_delta', data: delta.content };
-          }
-
-          // Handle reasoning (Claude/DeepSeek)
-          if (delta?.reasoning_content) {
-            yield { type: 'reasoning', data: delta.reasoning_content };
-          }
-          if (delta?.thinking) {
-            yield { type: 'reasoning', data: delta.thinking };
-          }
-
-          // Handle completion
-          if (finishReason) {
-            // Emit any completed tool calls
-            for (const toolCall of currentToolCalls.values()) {
-              // Try to parse any remaining raw arguments
-              if (toolCall.arguments._raw) {
-                try {
-                  const parsed = JSON.parse(toolCall.arguments._raw);
-                  delete toolCall.arguments._raw;
-                  toolCall.arguments = { ...toolCall.arguments, ...parsed };
-                } catch {
-                  // Keep as-is if unparseable
-                }
-              }
-              
-              yield {
-                type: 'tool_call_end',
-                toolCall,
-              };
-            }
-            currentToolCalls.clear();
-            
-            yield {
-              type: 'done',
-              stopReason: finishReason,
-            };
-          }
-        } catch {
-          // Skip invalid JSON
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
+  yield* streamEventsFromOpenAiSseResponse(response);
 }
 
 async function* streamKimiWithTools(
   model: string,
   messages: Message[],
-  tools?: ToolDefinition[]
+  tools: ToolDefinition[] | undefined,
+  signal: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
-  // Kimi/Moonshot also supports OpenAI-compatible tool calling
-  const body: any = {
-    model: model.replace('kimi-', ''),
-    messages: messages.map(m => {
-      if (m.role === 'tool') {
-        return {
-          role: 'tool',
-          content: m.content,
-          tool_call_id: m.tool_call_id,
-        };
-      }
-      if (m.role === 'assistant' && m.tool_calls) {
-        return {
-          role: 'assistant',
-          content: m.content,
-          tool_calls: m.tool_calls.map(tc => ({
-            id: tc.id,
-            type: 'function',
-            function: {
-              name: tc.name,
-              arguments: JSON.stringify(tc.arguments),
-            },
-          })),
-        };
-      }
-      return {
-        role: m.role,
-        content: m.content,
-      };
-    }),
-    stream: true,
-  };
-
-  if (tools && tools.length > 0) {
-    body.tools = formatToolsForProvider(tools);
-    body.tool_choice = 'auto';
-  }
+  const apiModel = model.replace('kimi-', '');
+  const body = buildStreamingRequestBody(model, messages, tools, apiModel);
 
   const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${KIMI_API_KEY}`,
+      Authorization: `Bearer ${KIMI_API_KEY}`,
     },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!response.ok) {
@@ -329,144 +184,42 @@ async function* streamKimiWithTools(
     throw new Error(`Kimi API error: ${response.status} - ${errorText}`);
   }
 
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('No response body');
-
-  const decoder = new TextDecoder();
-  let currentToolCalls: Map<number, ToolCall> = new Map();
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        
-        const data = line.slice(6);
-        if (data === '[DONE]') continue;
-
-        try {
-          const parsed = JSON.parse(data);
-          const delta = parsed.choices?.[0]?.delta;
-          const finishReason = parsed.choices?.[0]?.finish_reason;
-
-          if (delta?.tool_calls) {
-            for (const toolDelta of delta.tool_calls) {
-              const index = toolDelta.index;
-              
-              if (!currentToolCalls.has(index)) {
-                const newToolCall: ToolCall = {
-                  id: toolDelta.id || `call_${Date.now()}_${index}`,
-                  name: toolDelta.function?.name || '',
-                  arguments: {},
-                };
-                currentToolCalls.set(index, newToolCall);
-                
-                yield {
-                  type: 'tool_call_start',
-                  toolCall: newToolCall,
-                };
-              }
-              
-              const existingCall = currentToolCalls.get(index)!;
-              
-              if (toolDelta.function?.arguments) {
-                try {
-                  const args = JSON.parse(toolDelta.function.arguments);
-                  existingCall.arguments = { ...existingCall.arguments, ...args };
-                } catch {
-                  const currentArgs = existingCall.arguments._raw || '';
-                  existingCall.arguments = { 
-                    ...existingCall.arguments, 
-                    _raw: currentArgs + toolDelta.function.arguments 
-                  };
-                }
-              }
-              
-              if (toolDelta.function?.name) {
-                existingCall.name = toolDelta.function.name;
-              }
-              
-              yield {
-                type: 'tool_call_delta',
-                toolCall: existingCall,
-              };
-            }
-          }
-
-          if (delta?.content) {
-            yield { type: 'text_delta', data: delta.content };
-          }
-
-          if (delta?.reasoning_content) {
-            yield { type: 'reasoning', data: delta.reasoning_content };
-          }
-
-          if (finishReason) {
-            for (const toolCall of currentToolCalls.values()) {
-              if (toolCall.arguments._raw) {
-                try {
-                  const parsed = JSON.parse(toolCall.arguments._raw);
-                  delete toolCall.arguments._raw;
-                  toolCall.arguments = { ...toolCall.arguments, ...parsed };
-                } catch {
-                  // Keep as-is
-                }
-              }
-              
-              yield {
-                type: 'tool_call_end',
-                toolCall,
-              };
-            }
-            currentToolCalls.clear();
-            
-            yield {
-              type: 'done',
-              stopReason: finishReason,
-            };
-          }
-        } catch {
-          // Skip invalid JSON
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
+  yield* streamEventsFromOpenAiSseResponse(response);
 }
 
-// Blocking mode for synthesis generation (kept for backward compat)
 export async function generateResponse(
   model: string,
-  messages: Message[]
+  messages: Message[],
+  streamSignal?: AbortSignal,
 ): Promise<string> {
   if (!hasApiKey()) {
     throw new Error('No API keys configured. Set OPENROUTER_API_KEY or KIMI_API_KEY.');
   }
 
-  const body: any = {
+  const body: Record<string, unknown> = {
     model,
-    messages: messages.map(m => ({
+    messages: messages.map((m) => ({
       role: m.role,
       content: m.content,
     })),
     stream: false,
   };
 
+  const signal =
+    streamSignal != null
+      ? AbortSignal.any([streamSignal, AbortSignal.timeout(GENERATE_RESPONSE_TIMEOUT_MS)])
+      : AbortSignal.timeout(GENERATE_RESPONSE_TIMEOUT_MS);
+
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
       'HTTP-Referer': 'http://localhost:5173',
       'X-Title': 'Debater',
     },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!response.ok) {
@@ -474,17 +227,13 @@ export async function generateResponse(
     throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
   return data.choices?.[0]?.message?.content || '';
 }
 
-export function buildSystemPrompt(
-  role: string,
-  style: string,
-  topic: string,
-  phase: string,
-  round: number
-): string {
+export function buildSystemPrompt(role: string, style: string, topic: string, phase: string, round: number): string {
   return `You are a ${role} in a formal debate about: ${topic}
 
 Style: ${style}

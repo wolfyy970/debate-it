@@ -34,7 +34,7 @@ No global state library. Each page manages its own state:
 
 - **Landing** — `topic` input, suggestion navigation
 - **Setup** — `topic`, `selectedMode`, `agents[]`, `toggles`
-- **LiveDebate** — `debate`, `streamingText`, `reasoningText`, `isStreaming`, `activeSearches[]`
+- **LiveDebate** — `useDebateSse` plus `debateSseReducer` fold SSE into debate snapshot, streaming text, reasoning, active searches, and control-plane state (cancel/retry, phase strip). `EventSource` lifecycle lives in the hook so reconnect and server job state stay aligned.
 - **Synthesis** — `debate`, `synthesis`
 
 ### Components
@@ -57,7 +57,8 @@ No global state library. Each page manages its own state:
 
 | Hook | File | Purpose |
 |------|------|---------|
-| `useBreakpoint` | `hooks/useBreakpoint.ts` | Returns 'mobile' | 'tablet' | 'desktop' |
+| `useBreakpoint` | `hooks/useBreakpoint.ts` | Responsive bucket: mobile, tablet, or desktop |
+| `useDebateSse` | `hooks/useDebateSse.ts` | SSE subscription to `/api/debates/:id/stream`; dispatches into `state/debateSseReducer.ts` |
 
 ## Backend
 
@@ -68,10 +69,10 @@ GET    /health              → Health check + API key status
 POST   /api/debates         → Create debate
 GET    /api/debates/:id     → Get debate
 POST   /api/debates/:id/turns    → Add moderator question
-POST   /api/debates/:id/next     → Queue next turn
+POST   /api/debates/:id/next     → Queue next turn (409 if a generation is already active)
 GET    /api/debates/:id/stream   → SSE stream
 POST   /api/debates/:id/cancel   → Cancel generation
-POST   /api/debates/:id/retry    → Retry failed turn
+POST   /api/debates/:id/retry    → Retry failed turn (409 if a generation is already active)
 POST   /api/debates/:id/complete → Complete + synthesize
 ```
 
@@ -81,8 +82,8 @@ POST   /api/debates/:id/complete → Complete + synthesize
 
 JSON file persistence layer:
 - `DebateStore` class with Map-based caching
-- Auto-save on every write
-- Load from disk on startup
+- Auto-save on every write using a temp file + rename
+- Load from disk on startup; `getLastLoadError()` records the last bootstrap failure (surfaced on `GET /health` as `persistence.loadError`)
 - Path: `data/debates.json`
 
 #### `lib/debate-agent.ts`
@@ -91,24 +92,42 @@ ReAct agent loop:
 - `DebateAgent` class
 - Async generator yields events: `text_delta`, `reasoning`, `tool_call_start`, `tool_call_delta`, `tool_call_end`, `search_results`, `done`, `error`
 - Max 5 iterations to prevent loops
-- Parses search results into structured sources
+- Parses search results into structured `Source` records for the store
+
+#### `lib/debate-phase.ts`
+
+Phase progression and “who speaks next” helpers shared by HTTP routes and the queue when a turn completes.
+
+#### `lib/synthesis.ts`
+
+Judge synthesis: message building, JSON extraction from model output, and a small fallback path when parsing fails.
 
 #### `lib/openrouter.ts`
 
 LLM streaming:
-- `streamWithTools()` — core streaming function
+- `streamWithTools()` — core streaming function (honors `AbortSignal` for cancel)
 - `streamOpenRouterWithTools()` — OpenRouter provider
 - `streamKimiWithTools()` — Kimi direct provider
 - `generateResponse()` — blocking mode for synthesis
 - `buildSystemPrompt()` — prompt construction
 
+#### `lib/chat-completion-sse.ts`
+
+Low-level SSE framing parser for provider streams (shared test coverage with the client wire format).
+
 #### `lib/generation-queue.ts`
 
-SSE event management:
-- `GenerationQueue` singleton
-- Job tracking (queued → generating → completed | error | cancelled)
-- SSE listener registration per debate
-- Event forwarding: chunks, reasoning, searches, errors, completion
+Generation orchestration (singleton):
+- Job lifecycle: queued → generating → completed | error | cancelled, with `AbortController` wired through `DebateAgent` / fetches
+- Registers per-debate SSE listeners; emits typed `ServerSseEvent` payloads (chunks, reasoning, search UI, errors, `turn`, `phase-change`, `cancelled`)
+- **Single writer for completed turns**: after a successful agent run, builds the `Turn`, runs `computePhaseAfterTurnCompletion`, persists via `DebateStore`, then notifies subscribers
+- `getActiveJob(debateId)` enables **409 Conflict** on `/next` and `/retry` when work is already in flight
+
+#### `lib/sse-events.ts` / `lib/sse-writer.ts` / `lib/http-errors.ts`
+
+- **`sse-events.ts`** — server-side typed stream events (keep aligned with `src/lib/sseEvents.ts` and `src/state/debateSseReducer.ts`; tests cover the wire format)
+- **`sse-writer.ts`** — `writeSseData` helper for Express SSE responses
+- **`http-errors.ts`** — `sendApiError` for consistent JSON error responses
 
 #### `lib/search.ts`
 
@@ -117,37 +136,42 @@ Tavily API wrapper:
 - Fallback message when API key missing
 - `formatSearchResults()` — string formatting
 
-#### `lib/tools.ts`
+#### `lib/tools/`
 
-Tool definitions:
-- `search_web` — parameters: `query`, `reason`
-- `read_url` — parameters: `url`, `reason`
-- `executeTool()` — dispatches to implementation
+Tool surface for the agent:
+- `definitions.ts` / `types.ts` — schema the model calls (`search_web`, `read_url`)
+- `executors/` — Tavily search and URL read implementations
+- `index.ts` — `executeTool` dispatcher
 
 #### `lib/tokenizer.ts`
 
 Token counting:
-- `countTokens()` — per-model token counting via js-tiktoken
-- `countMessagesTokens()` — batch counting with overhead
+- `countTokens()` — per-model token counting via js-tiktoken (with safe fallback)
+
+#### `lib/constants.ts`
+
+Shared magic numbers (for example SSE heartbeat interval) imported by routes and tests.
+
+#### `shared/domain.ts`
+
+Cross-tier domain types (re-exported or mirrored on client where needed).
 
 ### Data Flow
 
 ```
-User clicks "Next" → POST /api/debates/:id/next
+User clicks "Next" → POST /api/debates/:id/next (409 if queue already active)
     ↓
 GenerationQueue.enqueue()
     ↓
-DebateAgent.run() → AsyncGenerator
+DebateAgent.run(signal) → AsyncGenerator
     ↓
-streamWithTools() → SSE from OpenRouter/Kimi
+streamWithTools(signal) → provider SSE → parsed chunks / reasoning / tools / sources
     ↓
-Event parsing → text_delta / reasoning / tool_call_* / done
+GenerationQueue forwards streaming SSE → GET /stream listeners → browser EventSource
     ↓
-GenerationQueue emits SSE events → Frontend
+useDebateSse + debateSseReducer → Live UI state
     ↓
-Frontend updates: streamingText, reasoningText, activeSearches
-    ↓
-On 'done': Save turn to store, update phase, emit 'turn' event
+On successful completion inside queue: persist Turn + phase/round, emit `turn` + `phase-change`
 ```
 
 ### Middleware
@@ -193,47 +217,39 @@ Design tokens in CSS custom properties enable:
 ```
 debate-it/
 ├── server/
-│   ├── index.ts              # Entry: Express setup, graceful shutdown
+│   ├── index.ts              # Entry: Express setup, graceful shutdown, /health
 │   ├── routes/
-│   │   └── debates.ts        # All debate endpoints
+│   │   └── debates.ts        # Debate REST + SSE route handlers
 │   ├── middleware/
 │   │   └── validation.ts     # Input validation
 │   └── lib/
-│       ├── store.ts          # JSON persistence
+│       ├── store.ts          # JSON persistence + IDs
 │       ├── debate-agent.ts   # ReAct agent loop
-│       ├── openrouter.ts     # LLM streaming
-│       ├── generation-queue.ts # SSE management
-│       ├── search.ts         # Tavily API
-│       ├── tools.ts          # Tool definitions
-│       └── tokenizer.ts      # Token counting
+│       ├── debate-phase.ts   # Phase / next-agent rules
+│       ├── synthesis.ts      # Judge synthesis helpers
+│       ├── openrouter.ts     # LLM streaming + blocking generate
+│       ├── chat-completion-sse.ts
+│       ├── generation-queue.ts
+│       ├── sse-events.ts
+│       ├── sse-writer.ts
+│       ├── http-errors.ts
+│       ├── search.ts
+│       ├── tools/            # Tool defs + executors
+│       ├── tokenizer.ts
+│       └── constants.ts
+├── shared/
+│   └── domain.ts             # Cross-tier domain types
 ├── src/
-│   ├── pages/
-│   │   ├── Landing.tsx       # Hero + topic input
-│   │   ├── Setup.tsx         # Agent configuration
-│   │   ├── LiveDebate.tsx    # Real-time viewing
-│   │   ├── Synthesis.tsx     # Final analysis
-│   │   └── ErrorPage.tsx     # Error states
-│   ├── components/
-│   │   ├── Masthead.tsx      # Header
-│   │   ├── Button.tsx        # Buttons
-│   │   ├── Card.tsx          # Cards
-│   │   ├── Pill.tsx          # Badges
-│   │   ├── Toggle.tsx        # Switches
-│   │   ├── Segmented.tsx     # Selectors
-│   │   ├── ModelSelect.tsx   # Model dropdown
-│   │   ├── Byline.tsx        # Attribution
-│   │   ├── Eyebrow.tsx       # Labels
-│   │   ├── PhaseGlyph.tsx    # Phase icons
-│   │   └── Caret.tsx         # Cursor
-│   ├── hooks/
-│   │   └── useBreakpoint.ts  # Responsive
-│   ├── types.ts              # All interfaces
-│   ├── tokens.css            # Design system
-│   └── main.tsx              # React entry
-├── data/
-│   └── debates.json          # Persistent storage
-├── logs/                     # Application logs
-├── start.sh                  # Startup script
-├── ecosystem.config.cjs      # PM2 config
-└── .env                      # Environment (gitignored)
+│   ├── pages/                # Landing, Setup, LiveDebate, Synthesis, Error
+│   ├── components/           # UI primitives + debate/PhaseStrip, TurnRow, …
+│   ├── hooks/                # useBreakpoint, useDebateSse
+│   ├── state/
+│   │   └── debateSseReducer.ts
+│   ├── lib/                  # constants, sseEvents, …
+│   ├── types.ts
+│   ├── tokens.css
+│   └── main.tsx
+├── data/debates.json         # Persistent storage (gitignored path in dev)
+├── start.sh
+└── ecosystem.config.cjs
 ```

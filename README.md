@@ -25,6 +25,8 @@ cp example.env .env
 
 ## Documentation
 
+How the markdown files relate: **[DOCUMENTATION.md](DOCUMENTATION.md)** (map only — setup stays here).
+
 | Document | Purpose |
 |----------|---------|
 | **[SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md)** | Narrative: debate flow, agents, evaluation |

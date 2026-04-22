@@ -1,10 +1,10 @@
-import { EventEmitter } from 'events';
-import { streamWithTools, type StreamEvent, type Message } from './openrouter';
-import { executeTool, TOOL_DEFINITIONS, type ToolCall, type ToolResult } from './tools';
-import { buildSystemPrompt } from './openrouter';
+import { streamWithTools, buildSystemPrompt } from './openrouter';
+import type { Message } from './llm-types';
+import { executeTool, TOOL_DEFINITIONS, type ToolCall } from './tools';
+import { MAX_AGENT_ITERATIONS } from './constants';
 import type { Source } from './store';
 
-export interface AgentContext {
+interface AgentContext {
   topic: string;
   phase: string;
   round: number;
@@ -15,9 +15,20 @@ export interface AgentContext {
 }
 
 export interface AgentEvent {
-  type: 'text_delta' | 'reasoning' | 'tool_call_start' | 'tool_call_end' | 'tool_result' | 'search_results' | 'thinking_start' | 'thinking_end' | 'done' | 'error';
+  type:
+    | 'text_delta'
+    | 'reasoning'
+    | 'tool_call_start'
+    | 'tool_call_delta'
+    | 'tool_call_end'
+    | 'tool_result'
+    | 'search_results'
+    | 'thinking_start'
+    | 'thinking_end'
+    | 'done'
+    | 'error';
   data?: string;
-  toolCall?: { name: string; arguments: Record<string, any> };
+  toolCall?: { name: string; arguments: Record<string, unknown> };
   toolResult?: { name: string; content: string };
   fullText?: string;
   sources?: Source[];
@@ -46,7 +57,6 @@ export class DebateAgent {
   private isRunning: boolean;
   private maxIterations: number;
   private iterationCount: number;
-  private emitter: EventEmitter;
   private sources: Source[];
   private sourceCounter: number;
 
@@ -57,17 +67,17 @@ export class DebateAgent {
     this.reasoningText = '';
     this.currentToolCalls = [];
     this.isRunning = false;
-    this.maxIterations = 5; // Prevent infinite loops
+    this.maxIterations = MAX_AGENT_ITERATIONS;
     this.iterationCount = 0;
-    this.emitter = new EventEmitter();
     this.sources = [];
     this.sourceCounter = 0;
   }
 
   /**
    * Run the agent loop. Yields events in real-time as the LLM generates.
+   * @param signal When aborted (e.g. user cancel), upstream fetch is aborted.
    */
-  async *run(): AsyncGenerator<AgentEvent> {
+  async *run(signal?: AbortSignal): AsyncGenerator<AgentEvent> {
     if (this.isRunning) {
       throw new Error('Agent is already running');
     }
@@ -90,7 +100,8 @@ export class DebateAgent {
         const stream = streamWithTools(
           this.context.model,
           this.messages,
-          TOOL_DEFINITIONS
+          TOOL_DEFINITIONS,
+          signal,
         );
         
         let hasToolCalls = false;
@@ -192,17 +203,29 @@ export class DebateAgent {
                   };
                   
                   const result = await executeTool(toolCall);
-                  
-                  // Parse search results to extract sources
-                  if (result.toolName === 'search_web' && !result.isError) {
-                    const beforeCount = this.sources.length;
-                    this.parseSearchResults(result.content);
-                    // Emit search results for frontend display
-                    if (this.sources.length > beforeCount) {
-                      const newSources = this.sources.slice(beforeCount);
+
+                  if (result.toolName === 'search_web' && !result.isError && result.sources?.length) {
+                    const added: Source[] = [];
+                    for (const s of result.sources) {
+                      if (
+                        s.url &&
+                        s.url.startsWith('http') &&
+                        !this.sources.find((x) => x.url === s.url)
+                      ) {
+                        this.sourceCounter++;
+                        const entry: Source = {
+                          title: s.title,
+                          url: s.url,
+                          snippet: s.snippet,
+                        };
+                        this.sources.push(entry);
+                        added.push(entry);
+                      }
+                    }
+                    if (added.length > 0) {
                       yield {
                         type: 'search_results',
-                        sources: newSources,
+                        sources: added,
                       };
                     }
                   }
@@ -306,26 +329,4 @@ export class DebateAgent {
     return [...this.sources];
   }
 
-  private parseSearchResults(content: string): void {
-    // Parse search results in format:
-    // Result 1:
-    // Title: ...
-    // URL: ...
-    // Content: ...
-    const resultRegex = /Result (\d+):\s*\nTitle: ([^\n]+)\s*\nURL: ([^\n]+)\s*\nContent: ([\s\S]*?)(?=\n\nResult \d+:|$)/g;
-    
-    let match;
-    while ((match = resultRegex.exec(content)) !== null) {
-      const [, , title, url, snippet] = match;
-      // Only add if URL is valid and not already tracked
-      if (url && url.startsWith('http') && !this.sources.find(s => s.url === url)) {
-        this.sourceCounter++;
-        this.sources.push({
-          title: title.trim(),
-          url: url.trim(),
-          snippet: snippet.trim().substring(0, 200),
-        });
-      }
-    }
-  }
 }

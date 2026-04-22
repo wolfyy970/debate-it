@@ -1,4 +1,5 @@
 import type { AgentRole } from '../types';
+import { getRoleColorToken } from '../theme/roleColors';
 
 interface BylineProps {
   role: AgentRole;
@@ -7,16 +8,8 @@ interface BylineProps {
   turn?: string | number;
 }
 
-const roleColors: Record<string, string> = {
-  Advocate: 'var(--advocate)',
-  Skeptic: 'var(--skeptic)',
-  Judge: 'var(--judge)',
-  'Fact-checker': 'var(--factcheck)',
-  Moderator: 'var(--ink-700)',
-};
-
 export function Byline({ role, style, model, turn }: BylineProps) {
-  const roleColor = roleColors[role] || 'var(--ink-700)';
+  const roleColor = getRoleColorToken(role);
 
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>

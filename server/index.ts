@@ -3,9 +3,12 @@ import express from 'express';
 import cors from 'cors';
 import debatesRouter from './routes/debates';
 import { checkApiKeys } from './lib/openrouter';
+import { sendApiError } from './lib/http-errors.js';
+import { getDebateStore } from './lib/store';
+import { DEFAULT_API_PORT, JSON_BODY_LIMIT } from './lib/constants';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || DEFAULT_API_PORT;
 
 // Environment validation
 function validateEnvironment(): void {
@@ -47,8 +50,8 @@ app.use((req, res, next) => {
 app.use(cors());
 
 // Body parsing
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
+app.use(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -63,6 +66,9 @@ app.get('/health', (req, res) => {
       kimi: keys.kimi,
     },
     hasAnyKey: keys.hasAny,
+    persistence: {
+      loadError: getDebateStore().getLastLoadError(),
+    },
   });
 });
 
@@ -71,21 +77,25 @@ app.use('/api/debates', debatesRouter);
 
 // 404 handler
 app.use((req, res) => {
-  res.status(404).json({
-    error: 'Not Found',
-    message: `Cannot ${req.method} ${req.path}`,
-    timestamp: new Date().toISOString(),
-  });
+  sendApiError(res, 404, 'Not Found', `Cannot ${req.method} ${req.path}`);
 });
 
 // Global error handler
-app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  void _next;
   console.error('Unhandled error:', err);
-  res.status(err.status || 500).json({
-    error: 'Internal Server Error',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
-    timestamp: new Date().toISOString(),
-  });
+  const status =
+    err && typeof err === 'object' && 'status' in err && typeof (err as { status: unknown }).status === 'number'
+      ? (err as { status: number }).status
+      : 500;
+  const message =
+    err instanceof Error ? err.message : typeof err === 'string' ? err : 'Something went wrong';
+  sendApiError(
+    res,
+    status,
+    'Internal Server Error',
+    process.env.NODE_ENV === 'development' ? message : 'Something went wrong',
+  );
 });
 
 // Start server

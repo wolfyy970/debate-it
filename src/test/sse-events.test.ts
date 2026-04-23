@@ -47,19 +47,40 @@ describe('parseSseEvent', () => {
   it('round-trips search_*', () => {
     const start: ServerSseEvent = {
       type: 'search_start',
-      data: { query: 'q', reason: 'r', name: 'search_web' },
+      data: { id: 'call_1', query: 'q', reason: 'r', name: 'search_web' },
     };
     expect(roundTrip(start)).toEqual(start);
     const upd: ServerSseEvent = {
       type: 'search_update',
-      data: { query: 'q2', reason: 'r2' },
+      data: { id: 'call_1', query: 'q2', reason: 'r2' },
     };
     expect(roundTrip(upd)).toEqual(upd);
     const res: ServerSseEvent = {
       type: 'search_result',
-      data: { results: [{ title: 'T', url: 'https://x' }] },
+      data: { id: 'call_1', results: [{ title: 'T', url: 'https://x' }] },
     };
     expect(roundTrip(res)).toEqual(res);
+    const resErr: ServerSseEvent = {
+      type: 'search_result',
+      data: { id: 'call_2', results: [], error: 'Tavily API error: 500', code: 'search_http' },
+    };
+    expect(roundTrip(resErr)).toEqual(resErr);
+  });
+
+  it('round-trips url_read', () => {
+    const e: ServerSseEvent = { type: 'url_read', data: { url: 'https://example.com/a' } };
+    expect(roundTrip(e)).toEqual(e);
+  });
+
+  it('rejects search_* events missing id', () => {
+    expect(
+      parseSseEvent(
+        JSON.stringify({ type: 'search_start', data: { query: 'q', reason: 'r' } }),
+      ),
+    ).toBeNull();
+    expect(
+      parseSseEvent(JSON.stringify({ type: 'search_result', data: { results: [] } })),
+    ).toBeNull();
   });
 
   it('round-trips done', () => {

@@ -8,20 +8,15 @@ The core principle: **the debate is not the product. The insight is.**
 
 ## Debate Flow
 
-### Phases
+### Phases and schedule
 
-1. **Opening** — Advocate and Skeptic present initial arguments (2 turns)
-2. **Cross-Ex** — Agents question each other; moderator can ask clarifying questions (4 turns)
-3. **Rebuttal** — Agents respond to cross-examination points
-4. **Final** — Closing arguments (2 turns)
-5. **Synthesis** — Judge analyzes all turns and produces structured output
+The flow is **not** a fixed five-phase script for every debate. A **canonical schedule** is built from **`structure`**: how many **rounds** (each round is one Advocate + one Skeptic segment), whether **cross-examination** runs (and after which round), a **`turnCap`** safety limit, and how the judge **synthesis** prompt is framed. Segments can include **Opening**, optional **Cross-Ex**, one or more numbered **Rebuttals**, **Final**, then **Synthesis** when agent turns are finished. The same schedule drives the server, the setup preview, and the live phase strip. Rules live in **`shared/debate-schedule.ts`** (see **ARCHITECTURE.md**).
 
-### Turn Rules
+### Turn rules (summary)
 
-- Advocate always goes first
-- Roles alternate: Advocate → Skeptic → Advocate → Skeptic
-- Phase advances automatically based on turn count
-- After total rounds, debate moves to Final then Synthesis
+- Within each two-speaker segment, **Advocate** speaks first, then **Skeptic**; the server picks the next role from the flattened schedule (not from raw “last turn in array” alternation).
+- **Moderator** clarifying questions during Cross-Ex do not advance the agent schedule.
+- When the schedule (and `turnCap`) say there are no agent turns left, **`POST /next`** returns **409** with `reason: schedule_complete`; the user ends with **End & Synthesize** for the judge document.
 
 ## Agents
 
@@ -49,7 +44,7 @@ Each agent runs a ReAct-style loop:
 2. Streams LLM response in real-time (SSE)
 3. Detects tool calls mid-generation (search_web, read_url)
 4. Executes tools and feeds results back into context
-5. Continues loop until LLM signals completion (max 5 iterations)
+5. Continues loop until LLM signals completion (max 8 iterations), then if the body would still be empty, runs one **no-tools** prose-only pass; if text is still empty, the turn errors instead of saving
 6. Parses search results into structured sources with inline citations
 
 ### Tools

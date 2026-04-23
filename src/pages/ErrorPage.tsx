@@ -1,5 +1,6 @@
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Masthead, Button } from '../components';
+import { useBreakpoint } from '../hooks/useBreakpoint';
 
 export function ErrorPage() {
   const [searchParams] = useSearchParams();
@@ -8,6 +9,7 @@ export function ErrorPage() {
 
   const missingLlm = searchParams.get('llm') === '1';
   const missingTavily = searchParams.get('tavily') === '1';
+  const { stackShell } = useBreakpoint();
 
   const getErrorContent = () => {
     switch (reason) {
@@ -61,6 +63,7 @@ export function ErrorPage() {
       <Masthead
         title="DEBATER"
         edition="ERROR"
+        compact={stackShell}
       />
 
       <div style={{
@@ -69,8 +72,10 @@ export function ErrorPage() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '48px',
+        padding: 'clamp(20px, 5vw, 48px) var(--pad-x)',
         textAlign: 'center',
+        width: '100%',
+        boxSizing: 'border-box',
       }}>
         {/* Warning icon */}
         <div style={{
@@ -120,7 +125,7 @@ export function ErrorPage() {
           {content.message}
         </p>
 
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
           {content.action && (
             <Button 
               size="md" 
@@ -141,10 +146,12 @@ export function ErrorPage() {
 
         <div style={{
           marginTop: 48,
-          padding: '24px 32px',
+          padding: 'var(--pad-y) var(--pad-x)',
           background: 'var(--paper-2)',
           border: '1px solid var(--ink-200)',
           maxWidth: 520,
+          width: '100%',
+          boxSizing: 'border-box',
           textAlign: 'left',
         }}>
           <div className="t-meta" style={{ marginBottom: 12, color: 'var(--ink-500)' }}>

@@ -1,4 +1,10 @@
 import type { Agent, Debate, Turn } from './store';
+import {
+  buildSchedule,
+  flattenAgentSteps,
+  countCommittedAgentTurns,
+  maxCommittedAgentTurns,
+} from '../../shared/debate-schedule';
 
 /** State after an agent turn is appended (mirrors turn commit in `GenerationQueue.runAgent`). */
 export interface PhaseRoundStatus {
@@ -12,35 +18,51 @@ export interface PhaseRoundStatus {
  * Must stay aligned with `server/lib/generation-queue.ts` turn commit.
  */
 export function computePhaseAfterTurnCompletion(input: {
-  phase: Debate['phase'];
-  round: number;
   totalRounds: number;
-  turnsLengthAfterPush: number;
-  status: Debate['status'];
+  committedAgentTurnsAfterPush: number;
+  structure: Debate['structure'];
 }): PhaseRoundStatus {
-  const { phase, round, totalRounds, turnsLengthAfterPush: len, status } = input;
+  const structure = input.structure;
+  const R = Math.max(2, structure.rounds || input.totalRounds);
+  const committed = input.committedAgentTurnsAfterPush;
+  const cap = maxCommittedAgentTurns(structure);
+  const steps = flattenAgentSteps(buildSchedule(structure));
 
-  if (phase === 'Opening' && len % 2 === 0) {
-    return { phase: 'Cross-Ex', round, status };
+  if (committed >= cap) {
+    return { phase: 'Synthesis', round: R, status: 'complete' };
   }
-  // Fixed four Cross-Ex turns per macro-round (Adv/Skept ×2 each). `Debate.structure.crossExAfterRound` in the DB is advisory until wired here.
-  if (phase === 'Cross-Ex' && len % 4 === 0) {
-    const nextRound = round + 1;
-    if (nextRound > totalRounds) {
-      return { phase: 'Final', round: nextRound, status };
-    }
-    return { phase: 'Opening', round: nextRound, status };
-  }
-  if (phase === 'Final') {
-    return { phase: 'Synthesis', round, status: 'complete' };
-  }
-  return { phase, round, status };
+
+  const next = steps[committed];
+  return { phase: next.phase, round: next.round, status: 'live' };
+}
+
+/** Recompute `phase`, `round`, and `status` from current turns (e.g. after retry pop). */
+export function syncDebatePhaseFromTurns(debate: Debate): void {
+  const committed = countCommittedAgentTurns(debate.turns);
+  const pr = computePhaseAfterTurnCompletion({
+    totalRounds: debate.totalRounds,
+    committedAgentTurnsAfterPush: committed,
+    structure: debate.structure,
+  });
+  debate.phase = pr.phase;
+  debate.round = pr.round;
+  debate.status = pr.status;
 }
 
 /**
- * Which role speaks next when queueing `/next` (Advocate first, then alternates).
- * Must stay aligned with `server/routes/debates.ts` POST `/:id/next`.
+ * Which role speaks next when queueing `/next` — driven by the canonical schedule.
  */
+export function resolveNextSpeakingRoleFromSchedule(debate: Debate): 'Advocate' | 'Skeptic' {
+  const steps = flattenAgentSteps(buildSchedule(debate.structure));
+  const committed = countCommittedAgentTurns(debate.turns);
+  const cap = maxCommittedAgentTurns(debate.structure);
+  if (committed >= cap) {
+    return steps[steps.length - 1]?.role ?? 'Advocate';
+  }
+  return steps[committed]?.role ?? 'Advocate';
+}
+
+/** @deprecated Prefer `resolveNextSpeakingRoleFromSchedule` */
 export function resolveNextSpeakingRole(turns: Pick<Turn, 'role'>[]): 'Advocate' | 'Skeptic' {
   if (turns.length === 0) return 'Advocate';
   const lastRole = turns[turns.length - 1].role;
@@ -48,6 +70,8 @@ export function resolveNextSpeakingRole(turns: Pick<Turn, 'role'>[]): 'Advocate'
 }
 
 export function resolveNextAgentForTurn(debate: Debate): Agent {
-  const nextRole = resolveNextSpeakingRole(debate.turns);
+  const nextRole = resolveNextSpeakingRoleFromSchedule(debate);
   return debate.agents.find((a) => a.role === nextRole) || debate.agents[0];
 }
+
+export { countCommittedAgentTurns, buildSchedule, flattenAgentSteps, maxCommittedAgentTurns };

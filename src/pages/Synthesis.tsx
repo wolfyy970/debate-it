@@ -7,8 +7,7 @@ import type { Turn } from '../types';
 
 export function SynthesisPage() {
   const { id } = useParams<{ id: string }>();
-  const bp = useBreakpoint();
-  const isMobile = bp === 'mobile';
+  const { stackShell } = useBreakpoint();
   const [debate, setDebate] = useState<{
     topic: string;
     turns: Turn[];
@@ -90,6 +89,7 @@ export function SynthesisPage() {
       <Masthead
         title="DEBATER"
         edition="SYNTHESIS"
+        compact={stackShell}
       />
 
       <div style={{ padding: 'var(--pad-y) var(--pad-x)' }}>
@@ -140,7 +140,7 @@ export function SynthesisPage() {
           }}>
             Key Arguments
           </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: stackShell ? '1fr' : '1fr 1fr', gap: 24 }}>
             <Card style={{ borderTop: '3px solid var(--advocate)' }}>
               <Byline role="Advocate" style="Data-driven" />
               <ul style={{
@@ -176,7 +176,7 @@ export function SynthesisPage() {
 
         {/* Points of Agreement / Disagreement */}
         <section style={{ marginBottom: 48 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: stackShell ? '1fr' : '1fr 1fr', gap: 24 }}>
             <div>
               <h3 style={{
                 fontFamily: 'var(--font-display)',

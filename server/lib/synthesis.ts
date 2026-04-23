@@ -21,7 +21,15 @@ export function buildSynthesisUserContent(debate: Debate): string {
     .join('\n\n')}`;
 }
 
-export function buildSynthesisMessages(debate: Debate): { role: 'system' | 'user' | 'assistant'; content: string }[] {
+export function buildSynthesisMessages(
+  debate: Debate,
+  synthesisType: Debate['structure']['synthesisType'] = 'judge',
+): { role: 'system' | 'user' | 'assistant'; content: string }[] {
+  const systemExtra =
+    synthesisType === 'judge+system'
+      ? '\n- Also include a brief "system" layer: practical stakes, risks, and guardrails beyond what either debater said verbatim.'
+      : '';
+
   return [
     {
       role: 'system',
@@ -32,7 +40,7 @@ Guidelines:
 - Identify genuine agreements
 - Distinguish factual from values-based disagreements
 - Note where evidence is lacking
-- Issue a clear, reasoned verdict
+- Issue a clear, reasoned verdict${systemExtra}
 
 Output format (JSON):
 {

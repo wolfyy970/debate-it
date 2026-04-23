@@ -18,6 +18,7 @@ export function ModelSelect({ value, provider, color, open, onToggle, onSelect }
     <div style={{ position: 'relative' }}>
       <button
         type="button"
+        className="debater-modelselect-trigger"
         onClick={onToggle}
         style={{
           width: '100%',
@@ -33,6 +34,7 @@ export function ModelSelect({ value, provider, color, open, onToggle, onSelect }
           fontSize: 13,
           textAlign: 'left',
           borderRadius: 0,
+          transition: 'border-color var(--dur-1) var(--ease-out)',
         }}
       >
         <span style={{ color }}>{displayProvider}</span>
@@ -72,6 +74,7 @@ export function ModelSelect({ value, provider, color, open, onToggle, onSelect }
                 return (
                   <div
                     key={m}
+                    className="debater-modelselect-option"
                     onClick={() => onSelect(m, roster.provider)}
                     style={{
                       padding: '8px 12px 8px 28px',

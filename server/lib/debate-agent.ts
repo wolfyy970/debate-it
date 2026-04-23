@@ -23,15 +23,24 @@ export interface AgentEvent {
     | 'tool_call_end'
     | 'tool_result'
     | 'search_results'
+    | 'url_read'
     | 'thinking_start'
     | 'thinking_end'
     | 'done'
     | 'error';
   data?: string;
-  toolCall?: { name: string; arguments: Record<string, unknown> };
+  toolCall?: { id: string; name: string; arguments: Record<string, unknown> };
   toolResult?: { name: string; content: string };
   fullText?: string;
   sources?: Source[];
+  /** Successful read_url fetch — URL for UI telemetry only. */
+  url?: string;
+  /** Present on `search_results` — identifies which tool call produced the sources. */
+  toolCallId?: string;
+  /** Present on `search_results` when the tool failed (Tavily error, timeout, etc.). */
+  searchError?: string;
+  /** Optional category for UI copy (`search_timeout`, etc.). */
+  searchErrorCode?: string;
 }
 
 /**
@@ -133,36 +142,30 @@ export class DebateAgent {
                 yield {
                   type: 'tool_call_start',
                   toolCall: {
+                    id: event.toolCall.id,
                     name: event.toolCall.name,
                     arguments: event.toolCall.arguments,
                   },
                 };
               }
               break;
-              
+
             case 'tool_call_delta':
-              // Update accumulated arguments (for display)
+              // Provider streams arguments as JSON fragments; mid-stream values
+              // are almost always empty or partial. Accumulate internally and
+              // let tool_call_end be the single authoritative update to the UI.
               if (event.toolCall) {
-                const existing = this.currentToolCalls.find(tc => tc.id === event.toolCall!.id);
-                if (existing) {
-                  existing.arguments = event.toolCall.arguments;
-                }
-                // Forward to frontend so search query updates live
-                yield {
-                  type: 'tool_call_delta',
-                  toolCall: {
-                    name: event.toolCall.name,
-                    arguments: event.toolCall.arguments,
-                  },
-                };
+                const existing = this.currentToolCalls.find((tc) => tc.id === event.toolCall!.id);
+                if (existing) existing.arguments = event.toolCall.arguments;
               }
               break;
-              
+
             case 'tool_call_end':
               if (event.toolCall) {
                 yield {
                   type: 'tool_call_end',
                   toolCall: {
+                    id: event.toolCall.id,
                     name: event.toolCall.name,
                     arguments: event.toolCall.arguments,
                   },
@@ -170,29 +173,20 @@ export class DebateAgent {
               }
               break;
               
-            case 'done':
+            case 'done': {
               // Add the assistant's message to context
               this.messages.push({
                 role: 'assistant',
                 content: currentText,
                 tool_calls: this.currentToolCalls.length > 0 ? this.currentToolCalls : undefined,
               });
-              
-              if (event.stopReason === 'stop' || event.stopReason === 'end_turn') {
-                // LLM is done
-                console.log(`[Agent] Done after ${this.iterationCount} iterations. Text length: ${this.fullText.length}, Sources: ${this.sources.length}`);
-                yield {
-                  type: 'done',
-                  fullText: this.fullText,
-                  data: this.reasoningText || undefined,
-                  sources: this.sources.length > 0 ? this.sources : undefined,
-                };
-                return;
-              } else if (event.stopReason === 'tool_calls' || hasToolCalls) {
+
+              // Tool rounds first: some providers may send stop + tool_calls; never skip executing tools.
+              if (event.stopReason === 'tool_calls' || hasToolCalls) {
                 console.log(`[Agent] Tool calls detected, executing ${this.currentToolCalls.length} tools`);
                 // Execute tools and continue loop
                 yield { type: 'thinking_end' };
-                
+
                 for (const toolCall of this.currentToolCalls) {
                   yield {
                     type: 'tool_result',
@@ -202,40 +196,66 @@ export class DebateAgent {
                     },
                   };
                   
-                  const result = await executeTool(toolCall);
+                  const result = await executeTool(toolCall, { signal });
+
+                  if (result.toolName === 'read_url' && !result.isError) {
+                    const url =
+                      typeof toolCall.arguments?.url === 'string' ? toolCall.arguments.url.trim() : '';
+                    if (url.startsWith('http')) {
+                      yield { type: 'url_read', url };
+                    }
+                  }
+
+                  let toolMessageContent = result.content;
 
                   if (result.toolName === 'search_web') {
-                    const added: Source[] = [];
+                    const rawForUi: Source[] = [];
                     if (!result.isError && result.sources?.length) {
                       for (const s of result.sources) {
-                        if (
-                          s.url &&
-                          s.url.startsWith('http') &&
-                          !this.sources.find((x) => x.url === s.url)
-                        ) {
-                          this.sourceCounter++;
-                          const entry: Source = {
+                        if (s.url && s.url.startsWith('http')) {
+                          rawForUi.push({
                             title: s.title,
                             url: s.url,
                             snippet: s.snippet,
-                          };
-                          this.sources.push(entry);
-                          added.push(entry);
+                          });
+                          if (!this.sources.find((x) => x.url === s.url)) {
+                            this.sourceCounter++;
+                            this.sources.push({
+                              title: s.title,
+                              url: s.url,
+                              snippet: s.snippet,
+                            });
+                          }
                         }
                       }
+                      const numbered = result.sources
+                        .filter((s) => s.url && s.url.startsWith('http'))
+                        .map((s) => {
+                          const idx = this.sources.findIndex((x) => x.url === s.url) + 1;
+                          if (idx < 1) return '';
+                          const snip = s.snippet?.trim() || '';
+                          return `[${idx}] ${s.title}\n${s.url}\n${snip}`;
+                        })
+                        .filter(Boolean)
+                        .join('\n\n');
+                      if (numbered) toolMessageContent = numbered;
                     }
-                    // Always emit so the UI closes the "searching" indicator,
-                    // even when the tool returned no results or errored.
+                    const searchError = result.isError
+                      ? result.content.replace(/^Error:\s*/i, '').trim() || 'Search failed'
+                      : undefined;
                     yield {
                       type: 'search_results',
-                      sources: added,
+                      sources: rawForUi,
+                      toolCallId: toolCall.id,
+                      searchError,
+                      searchErrorCode: result.isError ? result.errorCode : undefined,
                     };
                   }
-                  
+
                   // Add tool result to messages
                   this.messages.push({
                     role: 'tool',
-                    content: result.content,
+                    content: toolMessageContent,
                     tool_call_id: result.toolCallId,
                     name: result.toolName,
                   });
@@ -244,7 +264,9 @@ export class DebateAgent {
                     type: 'tool_result',
                     toolResult: {
                       name: result.toolName,
-                      content: result.content.substring(0, 500) + (result.content.length > 500 ? '...' : ''),
+                      content:
+                        toolMessageContent.substring(0, 500) +
+                        (toolMessageContent.length > 500 ? '...' : ''),
                     },
                   };
                 }
@@ -252,8 +274,54 @@ export class DebateAgent {
                 this.currentToolCalls = [];
                 hasToolCalls = false;
                 currentText = '';
+                break;
               }
-              break;
+
+              if (event.stopReason === 'stop' || event.stopReason === 'end_turn') {
+                if (this.fullText.trim().length > 0) {
+                  console.log(
+                    `[Agent] Done after ${this.iterationCount} iterations. Text length: ${this.fullText.length}, Sources: ${this.sources.length}`,
+                  );
+                  yield {
+                    type: 'done',
+                    fullText: this.fullText,
+                    data: this.reasoningText || undefined,
+                    sources: this.sources.length > 0 ? this.sources : undefined,
+                  };
+                  return;
+                }
+                yield { type: 'thinking_end' };
+                yield* this.runForcedProsePass(signal);
+                if (this.fullText.trim().length === 0) {
+                  yield { type: 'error', data: 'Model produced no argument' };
+                  return;
+                }
+                yield {
+                  type: 'done',
+                  fullText: this.fullText,
+                  data: this.reasoningText || undefined,
+                  sources: this.sources.length > 0 ? this.sources : undefined,
+                };
+                return;
+              }
+
+              // Unknown / empty stopReason: require prose if body still empty
+              if (this.fullText.trim().length === 0) {
+                yield { type: 'thinking_end' };
+                yield* this.runForcedProsePass(signal);
+                if (this.fullText.trim().length === 0) {
+                  yield { type: 'error', data: 'Model produced no argument' };
+                  return;
+                }
+              }
+              yield {
+                type: 'done',
+                fullText: this.fullText,
+                data: this.reasoningText || undefined,
+                sources: this.sources.length > 0 ? this.sources : undefined,
+              };
+              return;
+            }
               
             case 'error':
               yield {
@@ -267,12 +335,27 @@ export class DebateAgent {
       
       // Max iterations reached
       console.log(`[Agent] Max iterations reached. Text length: ${this.fullText.length}`);
-      yield {
-        type: 'done',
-        fullText: this.fullText,
-        data: this.reasoningText || undefined,
-        sources: this.sources.length > 0 ? this.sources : undefined,
-      };
+      if (this.fullText.trim().length > 0) {
+        yield {
+          type: 'done',
+          fullText: this.fullText,
+          data: this.reasoningText || undefined,
+          sources: this.sources.length > 0 ? this.sources : undefined,
+        };
+      } else {
+        yield { type: 'thinking_end' };
+        yield* this.runForcedProsePass(signal);
+        if (this.fullText.trim().length === 0) {
+          yield { type: 'error', data: 'Model produced no argument' };
+          return;
+        }
+        yield {
+          type: 'done',
+          fullText: this.fullText,
+          data: this.reasoningText || undefined,
+          sources: this.sources.length > 0 ? this.sources : undefined,
+        };
+      }
     } catch (error) {
       yield {
         type: 'error',
@@ -281,6 +364,60 @@ export class DebateAgent {
     } finally {
       this.isRunning = false;
     }
+  }
+
+  /**
+   * One streaming call with tools disabled so the model must emit plain-text argument.
+   * Used when the ReAct loop would otherwise commit an empty body.
+   */
+  private async *runForcedProsePass(signal?: AbortSignal): AsyncGenerator<AgentEvent> {
+    this.messages.push({
+      role: 'user',
+      content:
+        'Your prior reply contained no readable argument text. Write your debate argument now in 200–400 words as plain text paragraphs only (no markdown). ' +
+        'Use evidence from tool results in this thread where relevant. Do not call search_web, read_url, or any other tools.',
+    });
+
+    const stream = streamWithTools(this.context.model, this.messages, undefined, signal);
+    let forcedAssistantText = '';
+
+    for await (const event of stream) {
+      switch (event.type) {
+        case 'text_delta':
+          forcedAssistantText += event.data || '';
+          this.fullText += event.data || '';
+          yield { type: 'text_delta', data: event.data };
+          break;
+        case 'reasoning':
+          this.reasoningText += event.data || '';
+          yield { type: 'reasoning', data: event.data };
+          break;
+        case 'done':
+          this.messages.push({
+            role: 'assistant',
+            content: forcedAssistantText,
+          });
+          yield { type: 'thinking_end' };
+          return;
+        case 'error':
+          yield { type: 'error', data: event.data || 'Unknown error' };
+          return;
+        case 'tool_call_start':
+        case 'tool_call_delta':
+        case 'tool_call_end':
+          break;
+        default:
+          break;
+      }
+    }
+
+    if (forcedAssistantText.trim().length > 0) {
+      this.messages.push({
+        role: 'assistant',
+        content: forcedAssistantText,
+      });
+    }
+    yield { type: 'thinking_end' };
   }
 
   private buildInitialMessages(): void {

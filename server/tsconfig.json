@@ -3,7 +3,6 @@
     "target": "ES2023",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "rootDir": ".",
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -11,5 +10,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["**/*.ts"]
+  "include": ["**/*.ts", "../shared/**/*.ts"]
 }

@@ -13,7 +13,7 @@ const SUGGESTIONS = [
 
 export function LandingPage() {
   const navigate = useNavigate();
-  const bp = useBreakpoint();
+  const { isMobile, isTablet, stackShell } = useBreakpoint();
   const [topic, setTopic] = useState('');
 
   const handleBegin = () => {
@@ -26,9 +26,6 @@ export function LandingPage() {
     navigate('/setup', { state: { topic: suggestion } });
   };
 
-  const isMobile = bp === 'mobile';
-  const isTablet = bp === 'tablet';
-
   return (
     <div style={{
       width: '100%',
@@ -40,6 +37,7 @@ export function LandingPage() {
       <Masthead
         title="DEBATER"
         edition="VOL. I \u00b7 NO. 01"
+        compact={stackShell}
       />
 
       {/* Hero */}
@@ -59,8 +57,8 @@ export function LandingPage() {
         {/* Headline + description row */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr' : '1fr 320px',
-          gap: isMobile ? 24 : 60,
+          gridTemplateColumns: stackShell ? '1fr' : '1fr 320px',
+          gap: stackShell ? 24 : 60,
           alignItems: 'start',
         }}>
           <div>
@@ -92,7 +90,7 @@ export function LandingPage() {
             </div>
           </div>
 
-          <div style={{ paddingTop: isMobile ? 0 : 16 }}>
+          <div style={{ paddingTop: stackShell ? 0 : 16 }}>
             <p style={{
               fontFamily: 'var(--font-body)',
               fontSize: 15,

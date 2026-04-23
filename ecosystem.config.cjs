@@ -10,11 +10,11 @@ module.exports = {
       max_memory_restart: '1G',
       env: {
         NODE_ENV: 'production',
-        PORT: 3001,
+        PORT: 38471,
       },
       env_development: {
         NODE_ENV: 'development',
-        PORT: 3001,
+        PORT: 38471,
       },
       log_file: './logs/server.log',
       out_file: './logs/server-out.log',
@@ -25,13 +25,15 @@ module.exports = {
     {
       name: 'debater-client',
       script: 'vite',
-      args: 'preview --port 5173',
+      args: 'preview',
       instances: 1,
       autorestart: true,
       watch: false,
       max_memory_restart: '512M',
       env: {
         NODE_ENV: 'production',
+        PORT: '38471',
+        VITE_DEV_PORT: '52817',
       },
       log_file: './logs/client.log',
       out_file: './logs/client-out.log',

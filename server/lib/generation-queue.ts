@@ -3,7 +3,7 @@ import { DebateAgent } from './debate-agent';
 import type { Agent, Debate, Source, Turn } from './store';
 import { countTokens } from './tokenizer';
 import { getDebateStore, generateId } from './store';
-import { computePhaseAfterTurnCompletion } from './debate-phase';
+import { computePhaseAfterTurnCompletion, countCommittedAgentTurns } from './debate-phase';
 import type { ServerSseEvent } from './sse-events';
 
 interface GenerationJob {
@@ -103,53 +103,70 @@ class GenerationQueue extends EventEmitter {
             break;
 
           case 'tool_call_start':
-            this.emitSSE(debateId, {
-              type: 'search_start',
-              data: {
-                query: (event.toolCall?.arguments?.query as string) || '',
-                reason: (event.toolCall?.arguments?.reason as string) || '',
-                name: event.toolCall?.name || '',
-              },
-            });
+            if (event.toolCall && event.toolCall.name === 'search_web') {
+              this.emitSSE(debateId, {
+                type: 'search_start',
+                data: {
+                  id: event.toolCall.id,
+                  query: (event.toolCall.arguments?.query as string) || '',
+                  reason: (event.toolCall.arguments?.reason as string) || '',
+                  name: event.toolCall.name || '',
+                },
+              });
+            }
             break;
 
           case 'tool_call_delta':
-            this.emitSSE(debateId, {
-              type: 'search_update',
-              data: {
-                query: (event.toolCall?.arguments?.query as string) || '',
-                reason: (event.toolCall?.arguments?.reason as string) || '',
-                name: event.toolCall?.name || '',
-              },
-            });
+            // Skipped on the wire — the provider streams arguments as JSON
+            // fragments that don't parse mid-stream, so deltas are almost
+            // always empty strings. tool_call_end is the authoritative update.
             break;
 
           case 'tool_call_end':
-            // Finalize the query on the UI (args are fully parsed here);
-            // the actual execution result is emitted later via `search_results`.
-            this.emitSSE(debateId, {
-              type: 'search_update',
-              data: {
-                query: (event.toolCall?.arguments?.query as string) || '',
-                reason: (event.toolCall?.arguments?.reason as string) || '',
-                name: event.toolCall?.name || '',
-              },
-            });
+            // Args are fully parsed here; emit the final query + reason once.
+            if (event.toolCall && event.toolCall.name === 'search_web') {
+              this.emitSSE(debateId, {
+                type: 'search_update',
+                data: {
+                  id: event.toolCall.id,
+                  query: (event.toolCall.arguments?.query as string) || '',
+                  reason: (event.toolCall.arguments?.reason as string) || '',
+                  name: event.toolCall.name || '',
+                },
+              });
+            }
             break;
 
           case 'tool_result':
             break;
 
           case 'search_results':
-            this.emitSSE(debateId, {
-              type: 'search_result',
-              data: {
-                results: (event.sources ?? []).map((s) => ({
-                  title: s.title,
-                  url: s.url,
-                })),
-              },
-            });
+            if (event.toolCallId) {
+              this.emitSSE(debateId, {
+                type: 'search_result',
+                data: {
+                  id: event.toolCallId,
+                  results: (event.sources ?? []).map((s) => ({
+                    title: s.title,
+                    url: s.url,
+                  })),
+                  ...(typeof event.searchError === 'string' && event.searchError
+                    ? {
+                        error: event.searchError,
+                        ...(typeof event.searchErrorCode === 'string'
+                          ? { code: event.searchErrorCode }
+                          : {}),
+                      }
+                    : {}),
+                },
+              });
+            }
+            break;
+
+          case 'url_read':
+            if (event.url) {
+              this.emitSSE(debateId, { type: 'url_read', data: { url: event.url } });
+            }
             break;
 
           case 'done':
@@ -193,12 +210,11 @@ class GenerationQueue extends EventEmitter {
 
       debateRef.turns.push(turn);
 
+      const committed = countCommittedAgentTurns(debateRef.turns);
       const pr = computePhaseAfterTurnCompletion({
-        phase: debateRef.phase,
-        round: debateRef.round,
         totalRounds: debateRef.totalRounds,
-        turnsLengthAfterPush: debateRef.turns.length,
-        status: debateRef.status,
+        committedAgentTurnsAfterPush: committed,
+        structure: debateRef.structure,
       });
       debateRef.phase = pr.phase;
       debateRef.round = pr.round;

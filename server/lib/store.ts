@@ -63,8 +63,9 @@ export interface Debate {
   structure: {
     rounds: number;
     turnCap: number;
-    /** Advisory in UI; phase engine uses fixed Opening/Cross-Ex lengths until wired. */
     crossExAfterRound: number;
+    /** When `false`, Cross-Ex is omitted. Omitted in persisted debates = enabled if `crossExAfterRound` is valid. */
+    crossExEnabled?: boolean;
     synthesisType: 'judge' | 'judge+system';
   };
   status: 'draft' | 'live' | 'paused' | 'complete';

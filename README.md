@@ -14,14 +14,17 @@ npm install
 cp example.env .env
 # Edit .env and add your API keys (OpenRouter or Kimi)
 
-# Start development
+# Start development (API + Vite in one terminal; Ctrl+C stops both)
+npm run dev:all
+
+# Or: build client once, then API + Vite (see start.sh)
 ./start.sh dev
 ```
 
-**Access:**
-- App: http://localhost:5173
-- API: http://localhost:3001
-- Health: http://localhost:3001/health
+**Access** (defaults; override `PORT` and `VITE_DEV_PORT` in `.env` — see `example.env`):
+- App: http://localhost:52817
+- API: http://localhost:38471
+- Health: http://localhost:38471/health
 
 ## Documentation
 
@@ -57,6 +60,8 @@ Both an LLM provider key and a Tavily key are required to run a debate. The serv
 - **OpenRouter** (`OPENROUTER_API_KEY`) **or** **Kimi** (`KIMI_API_KEY`) — LLM access
 - **Tavily** (`TAVILY_API_KEY`) — web search for agent fact-checking (no Tavily, no debate)
 
-Optional **`VITE_API_URL`** in `.env` points the SPA at a separate API host (all `fetch` and `EventSource` use it). Leave unset for same-origin or the Vite dev proxy.
+**Both LLM keys set?** If `OPENROUTER_API_KEY` and `KIMI_API_KEY` are both present, traffic goes to **OpenRouter** (including models like `moonshotai/kimi-k2.6`). Use only `OPENROUTER_API_KEY` when you want OpenRouter-hosted Kimi; use only `KIMI_API_KEY` when you want the direct Moonshot API. Optional `DEBUG_DEBATE_SSE=1` logs streamed `delta` keys for debugging reasoning visibility (see `example.env`).
+
+Optional **`VITE_API_URL`** points the SPA at a separate API host. **For local development, leave it empty** so requests stay on the Vite origin (`/api/...` is proxied to `PORT`). Only set it when the built UI and API are on different origins. **`PORT`** and **`VITE_DEV_PORT`** set the API and dev client ports (see `example.env`).
 
 See [USER_GUIDE.md](USER_GUIDE.md) for detailed setup.

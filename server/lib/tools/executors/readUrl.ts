@@ -1,4 +1,14 @@
-export async function runReadUrl(args: Record<string, unknown>): Promise<string> {
+const READ_URL_TIMEOUT_MS = 10_000;
+
+function composeReadUrlSignal(streamSignal?: AbortSignal): AbortSignal {
+  const wall = AbortSignal.timeout(READ_URL_TIMEOUT_MS);
+  return streamSignal != null ? AbortSignal.any([wall, streamSignal]) : wall;
+}
+
+export async function runReadUrl(
+  args: Record<string, unknown>,
+  streamSignal?: AbortSignal,
+): Promise<string> {
   const url = args.url;
   if (!url || typeof url !== 'string') {
     throw new Error('Missing required parameter: url');
@@ -9,7 +19,7 @@ export async function runReadUrl(args: Record<string, unknown>): Promise<string>
       headers: {
         'User-Agent': 'Debater/1.0 (Research Assistant)',
       },
-      signal: AbortSignal.timeout(10000),
+      signal: composeReadUrlSignal(streamSignal),
     });
 
     if (!response.ok) {

@@ -26,6 +26,8 @@ export interface ToolResult {
   isError: boolean;
   /** Populated for `search_web` on success (structured; no regex re-parse). */
   sources?: Source[];
+  /** Populated when `isError` and the failure is categorized (e.g. `search_timeout`). */
+  errorCode?: string;
 }
 
 export type ToolExecutor = (args: Record<string, unknown>) => Promise<string>;

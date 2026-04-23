@@ -4,16 +4,20 @@ interface MastheadProps {
   title?: string;
   edition?: string;
   right?: ReactNode;
+  /** Narrow / stacked shell: tighter padding and wrapping so title + actions fit. */
+  compact?: boolean;
 }
 
-export function Masthead({ title = "DEBATER", edition, right }: MastheadProps) {
+export function Masthead({ title = "DEBATER", edition, right, compact }: MastheadProps) {
   return (
     <header style={{
       borderBottom: '1px solid var(--ink-900)',
-      padding: '14px 28px 12px',
+      padding: compact ? '12px var(--pad-x) 10px' : '14px 28px 12px',
       display: 'flex',
       alignItems: 'baseline',
-      gap: 24,
+      flexWrap: 'wrap',
+      rowGap: 8,
+      columnGap: compact ? 12 : 24,
       background: 'var(--paper)',
     }}>
       <a
@@ -29,11 +33,11 @@ export function Masthead({ title = "DEBATER", edition, right }: MastheadProps) {
         }}
       >{title}</a>
       {edition && (
-        <div className="t-meta" style={{ color: 'var(--ink-500)' }}>
+        <div className="t-meta" style={{ color: 'var(--ink-500)', minWidth: 0 }}>
           {edition}
         </div>
       )}
-      <div style={{ flex: 1 }} />
+      <div style={{ flex: 1, minWidth: 0 }} />
       {right}
     </header>
   );

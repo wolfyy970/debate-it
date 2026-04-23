@@ -8,32 +8,33 @@ interface PillProps {
 }
 
 export function Pill({ children, active, onClick, variant }: PillProps) {
-  const styles = {
-    default: { bg: 'transparent', fg: 'var(--ink-700)', bd: 'var(--ink-200)' },
-    active: { bg: 'var(--ink-900)', fg: 'var(--paper)', bd: 'var(--ink-900)' },
-    accent: { bg: 'var(--accent-bg)', fg: 'var(--accent)', bd: 'var(--accent)' },
-    ghost: { bg: 'transparent', fg: 'var(--ink-500)', bd: 'transparent' },
-  };
+  const looksActive = Boolean(active || variant === 'active');
+  const isAccentOrGhost = variant === 'accent' || variant === 'ghost';
 
-  const s = variant ? styles[variant] : (active ? styles.active : styles.default);
+  if (onClick && !isAccentOrGhost) {
+    return (
+      <button
+        type="button"
+        className="debater-pill"
+        data-active={looksActive ? 'true' : undefined}
+        onClick={onClick}
+      >
+        {children}
+      </button>
+    );
+  }
+
+  if (isAccentOrGhost) {
+    return (
+      <span className={`debater-pill debater-pill--${variant}`}>
+        {children}
+      </span>
+    );
+  }
 
   return (
-    <span onClick={onClick} style={{
-      fontFamily: 'var(--font-mono)',
-      fontSize: 11,
-      letterSpacing: '0.08em',
-      textTransform: 'uppercase',
-      padding: '4px 10px',
-      border: `1px solid ${s.bd}`,
-      color: s.fg,
-      background: s.bg,
-      borderRadius: 999,
-      cursor: onClick ? 'pointer' : 'default',
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 6,
-      lineHeight: 1.2,
-      whiteSpace: 'nowrap',
-    }}>{children}</span>
+    <span className="debater-pill" data-active={looksActive ? 'true' : undefined}>
+      {children}
+    </span>
   );
 }

@@ -57,11 +57,10 @@ export interface DebateToggles {
 export interface DebateStructure {
   rounds: number;
   turnCap: number;
-  /**
-   * Shown in setup UI as “after round N”. Phase math in `server/lib/debate-phase.ts` currently
-   * uses fixed Opening/Cross-Ex lengths (2 + 4 turns per macro-round); this field is advisory until wired.
-   */
+  /** Insert Cross-Ex after this debate round (1..rounds-1) when `crossExEnabled` is true. */
   crossExAfterRound: number;
+  /** When `false`, no Cross-Ex segment appears. Default: enabled. */
+  crossExEnabled?: boolean;
   synthesisType: 'judge' | 'judge+system';
 }
 

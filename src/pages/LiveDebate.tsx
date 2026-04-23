@@ -1,12 +1,18 @@
-import { useState, useEffect, useRef, useCallback, useReducer } from 'react';
+import { useState, useEffect, useRef, useCallback, useReducer, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Masthead, Eyebrow, Pill, Button } from '../components';
 import { PhaseStrip } from '../components/debate/PhaseStrip';
 import { TurnRow } from '../components/debate/TurnRow';
 import { useBreakpoint } from '../hooks/useBreakpoint';
-import { useDebateSse } from '../hooks/useDebateSse';
-import type { AgentRole } from '../types';
-import { getRoleColorToken } from '../theme/roleColors';
+import { useDebateSse, type DebateConnectionStatus } from '../hooks/useDebateSse';
+import type { AgentRole, DebateStructure } from '../types';
+import {
+  buildSchedule,
+  flattenAgentSteps,
+  countCommittedAgentTurns,
+  activeScheduleSegmentIndex,
+  maxCommittedAgentTurns,
+} from '../lib/debateSchedule';
 import { AUTO_ADVANCE_MS } from '../lib/constants';
 import { apiUrl } from '../lib/apiBase';
 import { missingKeysErrorPath, parseMissingKeys } from '../lib/apiErrors';
@@ -15,13 +21,23 @@ import {
   getInitialDebateLiveUiState,
 } from '../state/debateSseReducer';
 
-type ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
+function coerceStructure(data: Record<string, unknown>): DebateStructure {
+  const s = data.structure as Partial<DebateStructure> | undefined;
+  const total = Number(data.totalRounds) || 4;
+  return {
+    rounds: typeof s?.rounds === 'number' ? s.rounds : total,
+    turnCap: typeof s?.turnCap === 'number' ? s.turnCap : 1_000_000,
+    crossExAfterRound:
+      typeof s?.crossExAfterRound === 'number' ? s.crossExAfterRound : Math.max(1, Math.floor(total / 2)),
+    crossExEnabled: s?.crossExEnabled !== false,
+    synthesisType: s?.synthesisType === 'judge+system' ? 'judge+system' : 'judge',
+  };
+}
 
 export function LiveDebatePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const bp = useBreakpoint();
-  const isMobile = bp === 'mobile';
+  const { isMobile, stackShell } = useBreakpoint();
 
   const [ui, dispatch] = useReducer(debateLiveReducer, undefined, () => getInitialDebateLiveUiState());
   const debate = ui.debate;
@@ -32,6 +48,10 @@ export function LiveDebatePage() {
   const generationError = ui.generationError;
   const isAdvancing = ui.isAdvancing;
   const activeSearches = ui.activeSearches;
+  const fullReadCount = ui.fullReadCount;
+  const liveSources = ui.liveSources;
+  const lastActivity = ui.lastActivity;
+  const lastEventAt = ui.lastEventAt;
 
   // Redirect if no debate ID
   useEffect(() => {
@@ -43,11 +63,9 @@ export function LiveDebatePage() {
   const [showClarifyInput, setShowClarifyInput] = useState(false);
   const [clarifyQuestion, setClarifyQuestion] = useState('');
   const [status, setStatus] = useState<'live' | 'paused'>('live');
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
+  const [connectionStatus, setConnectionStatus] = useState<DebateConnectionStatus>('connecting');
   const autoAdvanceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clarifyInputRef = useRef<HTMLTextAreaElement>(null);
-
-  useDebateSse(id, dispatch, setConnectionStatus);
 
   const fetchDebate = useCallback(async () => {
     if (!id) return;
@@ -64,13 +82,17 @@ export function LiveDebatePage() {
             totalRounds: data.totalRounds,
             turns: data.turns,
             status: data.status,
+            structure: coerceStructure(data as Record<string, unknown>),
+            agents: Array.isArray(data.agents) ? data.agents : [],
           },
         });
       }
     } catch (error) {
       console.error('Failed to fetch debate:', error);
     }
-  }, [id]);
+  }, [id, dispatch]);
+
+  useDebateSse(id, dispatch, setConnectionStatus, fetchDebate);
 
   useEffect(() => {
     fetchDebate();
@@ -88,6 +110,19 @@ export function LiveDebatePage() {
         const missing = await parseMissingKeys(response);
         navigate(missingKeysErrorPath(missing));
         dispatch({ type: 'NEXT_FAIL', message: 'Service unavailable' });
+        return;
+      }
+
+      if (response.status === 409) {
+        const errorData = await response.json().catch(() => ({}));
+        const reason = (errorData as { reason?: string }).reason;
+        dispatch({
+          type: 'NEXT_FAIL',
+          message:
+            reason === 'schedule_complete'
+              ? 'Debate schedule is complete.'
+              : (errorData as { message?: string }).message || 'Cannot start next turn.',
+        });
         return;
       }
 
@@ -110,10 +145,10 @@ export function LiveDebatePage() {
 
     if (
       status === 'live' &&
+      debate.status === 'live' &&
       !isStreaming &&
       !isThinking &&
       activeSearches.length === 0 &&
-      debate.phase !== 'Synthesis' &&
       !isAdvancing &&
       connectionStatus === 'connected'
     ) {
@@ -126,6 +161,7 @@ export function LiveDebatePage() {
     }
   }, [
     debate,
+    debate?.status,
     id,
     status,
     isStreaming,
@@ -200,6 +236,7 @@ export function LiveDebatePage() {
       });
       setClarifyQuestion('');
       setShowClarifyInput(false);
+      void fetchDebate();
     } catch (error) {
       console.error('Failed to submit question:', error);
     }
@@ -216,6 +253,12 @@ export function LiveDebatePage() {
       console.error('Failed to end debate:', error);
     }
   };
+
+  const segments = useMemo(
+    () => (debate ? buildSchedule(debate.structure) : []),
+    [debate],
+  );
+  const scheduleSteps = useMemo(() => flattenAgentSteps(segments), [segments]);
 
   if (!debate) {
     return (
@@ -234,14 +277,23 @@ export function LiveDebatePage() {
   }
 
   const isCrossEx = debate.phase === 'Cross-Ex';
-  
+  const committed = countCommittedAgentTurns(debate.turns);
+  const agentTurnCap = maxCommittedAgentTurns(debate.structure);
+  const activeSegIdx = activeScheduleSegmentIndex(
+    debate.structure,
+    debate.turns,
+    debate.status,
+    debate.phase,
+  );
+
   // Check which role is currently generating (including searches and queueing)
   const isGenerating = isStreaming || isThinking || activeSearches.length > 0 || isAdvancing;
-  const currentRole = isGenerating 
-    ? (debate.turns.length > 0 
-      ? debate.turns[debate.turns.length - 1].role === 'Advocate' ? 'Skeptic' : 'Advocate'
-      : 'Advocate')
-    : null;
+  const nextRoleForRow =
+    isGenerating && committed < agentTurnCap && committed < scheduleSteps.length
+      ? scheduleSteps[committed].role
+      : null;
+  const nextAgent =
+    nextRoleForRow != null ? debate.agents.find((a) => a.role === nextRoleForRow) : undefined;
 
   // Determine which turn is currently being generated
   const generatingTurnIndex = isGenerating ? debate.turns.length : -1;
@@ -259,14 +311,17 @@ export function LiveDebatePage() {
       <Masthead
         title="DEBATER"
         edition={`LIVE · ${new Date().toISOString().slice(0, 10).toUpperCase()}`}
+        compact={stackShell}
         right={
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             <Pill>Mode · Balanced</Pill>
-            <Pill variant="accent">● Live</Pill>
             {connectionStatus === 'connected' && (
-              <Pill variant="ghost">● Connected</Pill>
+              <Pill variant="accent">● Live</Pill>
             )}
             {connectionStatus === 'connecting' && (
+              <Pill variant="accent">◐ Connecting…</Pill>
+            )}
+            {connectionStatus === 'reconnecting' && (
               <Pill variant="accent">◐ Reconnecting…</Pill>
             )}
             {connectionStatus === 'disconnected' && (
@@ -291,7 +346,7 @@ export function LiveDebatePage() {
           {debate.topic}
         </h1>
         <div style={{ marginTop: 20, display: 'flex', gap: 28, alignItems: 'center', flexWrap: 'wrap' }}>
-          <PhaseStrip phase={debate.phase} />
+          <PhaseStrip segments={segments} activeSegmentIndex={activeSegIdx} />
           <div style={{ flex: 1, height: 1, background: 'var(--ink-200)', minWidth: 40 }} />
           <div className="t-meta" style={{ color: 'var(--ink-700)' }}>
             Round {String(debate.round).padStart(2, '0')} / {String(debate.totalRounds).padStart(2, '0')}
@@ -321,11 +376,11 @@ export function LiveDebatePage() {
       )}
 
       {/* Main content */}
-      <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: isMobile ? '1fr' : '1fr 320px', 
-        gap: isMobile ? 0 : 48,
-        padding: isMobile ? '24px var(--pad-x)' : '32px var(--pad-x)',
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr',
+        gap: 32,
+        padding: stackShell ? '24px var(--pad-x)' : '32px var(--pad-x)',
         flex: 1,
       }}>
         <div>
@@ -340,19 +395,30 @@ export function LiveDebatePage() {
               isThinking={isGenerating && i === generatingTurnIndex ? isThinking : false}
               searches={isGenerating && i === generatingTurnIndex ? activeSearches : []}
               isMobile={isMobile}
+              agents={debate.agents}
+              fullReadCount={fullReadCount}
+              lastActivity={isGenerating && i === generatingTurnIndex ? lastActivity : null}
+              lastEventAt={isGenerating && i === generatingTurnIndex ? lastEventAt : 0}
+              citationSources={
+                isGenerating && i === generatingTurnIndex && liveSources.length > 0
+                  ? liveSources
+                  : undefined
+              }
             />
           ))}
 
           {/* Active generation row */}
-          {isGenerating && (
+          {isGenerating && nextRoleForRow != null && (
             <TurnRow
               turn={{
                 id: 'generating',
                 n: debate.turns.length + 1,
-                role: currentRole as AgentRole,
+                role: nextRoleForRow as AgentRole,
                 phase: debate.phase,
                 text: '',
                 timestamp: new Date().toISOString(),
+                style: nextAgent?.style,
+                model: nextAgent?.model,
               }}
               isGenerating={true}
               streamingText={streamingText}
@@ -360,91 +426,14 @@ export function LiveDebatePage() {
               isThinking={isThinking}
               searches={activeSearches}
               isMobile={isMobile}
+              agents={debate.agents}
+              fullReadCount={fullReadCount}
+              lastActivity={lastActivity}
+              lastEventAt={lastEventAt}
+              citationSources={liveSources.length > 0 ? liveSources : undefined}
             />
           )}
         </div>
-
-        {/* Right sidebar - hidden on mobile */}
-        {!isMobile && <aside style={{ paddingTop: 8 }}>
-          <div style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 10,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--ink-500)',
-            marginBottom: 20,
-          }}>
-            Live Ledger
-          </div>
-
-          {/* Points raised */}
-          <div style={{ marginBottom: 32 }}>
-            <div style={{
-              fontFamily: 'var(--font-display)',
-              fontWeight: 500,
-              fontSize: 16,
-              marginBottom: 16,
-            }}>
-              Points raised
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {debate.turns
-                .filter(t => !t.meta && t.text.length > 20)
-                .slice(-6)
-                .map((turn) => (
-                  <div key={turn.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <div style={{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: 10,
-                      letterSpacing: '0.08em',
-                      textTransform: 'uppercase',
-                      color: getRoleColorToken(turn.role),
-                    }}>
-                      {turn.role}
-                    </div>
-                    <div style={{
-                      fontSize: 13,
-                      lineHeight: 1.5,
-                      color: 'var(--ink-700)',
-                    }}>
-                      {turn.text.slice(0, 80)}{turn.text.length > 80 ? '...' : ''}
-                    </div>
-                  </div>
-                ))}
-            </div>
-          </div>
-
-          {/* Simple stats */}
-          <div style={{
-            borderTop: '1px solid var(--ink-200)',
-            paddingTop: 16,
-          }}>
-            <div style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 10,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: 'var(--ink-500)',
-              marginBottom: 12,
-            }}>
-              Progress
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span className="t-ui" style={{ fontSize: 13, color: 'var(--ink-500)' }}>Turns</span>
-                <span className="t-mono" style={{ fontSize: 12 }}>{debate.turns.length}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span className="t-ui" style={{ fontSize: 13, color: 'var(--ink-500)' }}>Phase</span>
-                <span className="t-mono" style={{ fontSize: 12 }}>{debate.phase}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span className="t-ui" style={{ fontSize: 13, color: 'var(--ink-500)' }}>Round</span>
-                <span className="t-mono" style={{ fontSize: 12 }}>{debate.round} / {debate.totalRounds}</span>
-              </div>
-            </div>
-          </div>
-        </aside>}
       </div>
 
       {/* Transport */}
@@ -549,7 +538,7 @@ export function LiveDebatePage() {
 
         <div style={{ flex: 1 }} />
         <div className="t-mono" style={{ color: 'var(--ink-500)', fontSize: 11 }}>
-          {debate.turns.length} / ~{debate.totalRounds * 2 + 2} turns
+          {committed} / {agentTurnCap} agent turns
         </div>
         <Button size="sm" variant="secondary" onClick={handleEndDebate}>
           End & Synthesize →

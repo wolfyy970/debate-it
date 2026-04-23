@@ -1,30 +1,43 @@
 import { useState, useEffect } from 'react';
+import {
+  breakpointFromWidth,
+  type BreakpointName,
+  TABLET_MAX_EXCLUSIVE,
+} from '../theme/breakpoints';
 
-type Breakpoint = 'mobile' | 'tablet' | 'desktop';
+export type Breakpoint = BreakpointName;
 
-const MOBILE_MAX = 640;
-const TABLET_MAX = 1024;
+export interface UseBreakpointResult {
+  bp: BreakpointName;
+  isMobile: boolean;
+  isTablet: boolean;
+  isDesktop: boolean;
+  /** Main + fixed rails stack (mobile + tablet); split two-column shell only on desktop. */
+  stackShell: boolean;
+}
 
-export function useBreakpoint(): Breakpoint {
-  const [bp, setBp] = useState<Breakpoint>(() => {
-    const w = typeof window !== 'undefined' ? window.innerWidth : TABLET_MAX + 1;
-    if (w < MOBILE_MAX) return 'mobile';
-    if (w < TABLET_MAX) return 'tablet';
-    return 'desktop';
-  });
+function computeState(width: number): UseBreakpointResult {
+  const bp = breakpointFromWidth(width);
+  return {
+    bp,
+    isMobile: bp === 'mobile',
+    isTablet: bp === 'tablet',
+    isDesktop: bp === 'desktop',
+    stackShell: bp !== 'desktop',
+  };
+}
+
+export function useBreakpoint(): UseBreakpointResult {
+  const [state, setState] = useState<UseBreakpointResult>(() =>
+    computeState(typeof window !== 'undefined' ? window.innerWidth : TABLET_MAX_EXCLUSIVE),
+  );
 
   useEffect(() => {
-    const onResize = () => {
-      const w = window.innerWidth;
-      if (w < MOBILE_MAX) setBp('mobile');
-      else if (w < TABLET_MAX) setBp('tablet');
-      else setBp('desktop');
-    };
-
+    const onResize = () => setState(computeState(window.innerWidth));
     window.addEventListener('resize', onResize);
     onResize();
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  return bp;
+  return state;
 }

@@ -3,7 +3,12 @@ import type { Request, Response } from 'express';
 import { createDebateInstance, getDebateStore, generateId } from '../lib/store';
 import { generateResponse, checkApiKeys } from '../lib/openrouter';
 import { getGenerationQueue } from '../lib/generation-queue';
-import { resolveNextAgentForTurn } from '../lib/debate-phase';
+import {
+  resolveNextAgentForTurn,
+  countCommittedAgentTurns,
+  maxCommittedAgentTurns,
+  syncDebatePhaseFromTurns,
+} from '../lib/debate-phase';
 import { SSE_HEARTBEAT_MS } from '../lib/constants';
 import {
   buildSynthesisMessages,
@@ -136,6 +141,8 @@ router.post(
       };
 
       debate.turns.push(turn);
+      /** Clarifying turns do not advance the agent schedule; resync keeps phase aligned with committed agent count. */
+      syncDebatePhaseFromTurns(debate);
       getDebateStore().set(debate.id, debate);
 
       res.status(201).json(debate);
@@ -156,6 +163,18 @@ router.post('/:id/next', validateId, async (req: Request, res: Response) => {
 
     if (debate.status !== 'live') {
       return sendApiError(res, 400, 'Validation Error', 'Debate is not live');
+    }
+
+    const committed = countCommittedAgentTurns(debate.turns);
+    const cap = maxCommittedAgentTurns(debate.structure);
+    if (committed >= cap) {
+      return sendApiError(
+        res,
+        409,
+        'Conflict',
+        'Debate schedule is complete; no further agent turns.',
+        { reason: 'schedule_complete' },
+      );
     }
 
     // Check if there's already an active generation
@@ -293,6 +312,7 @@ router.post('/:id/retry', validateId, async (req: Request, res: Response) => {
 
       // Remove the last turn
       debate.turns.pop();
+      syncDebatePhaseFromTurns(debate);
 
       // Enqueue generation
       const jobId = queue.enqueue(debate.id, nextAgent, debate);
@@ -334,7 +354,7 @@ router.post('/:id/complete', validateId, async (req: Request, res: Response) => 
       // Generate real synthesis via LLM
       const judgeAgent = debate.agents.find(a => a.role === 'Judge') || debate.agents[0];
       
-      const synthesisMessages = buildSynthesisMessages(debate);
+      const synthesisMessages = buildSynthesisMessages(debate, debate.structure.synthesisType);
 
       try {
         const synthesisText = await generateResponse(judgeAgent.model, synthesisMessages);

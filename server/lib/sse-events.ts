@@ -14,6 +14,7 @@ export type ServerSseEventType =
   | 'search_start'
   | 'search_update'
   | 'search_result'
+  | 'url_read'
   | 'done'
   | 'error'
   | 'cancelled';
@@ -36,20 +37,26 @@ export type ServerSseEvent =
   | { type: 'reasoning'; data: string }
   | {
       type: 'search_start';
-      data: { query: string; reason: string; name?: string };
+      data: { id: string; query: string; reason: string; name?: string };
     }
   | {
       type: 'search_update';
-      data: { query: string; reason: string; name?: string };
+      data: { id: string; query: string; reason: string; name?: string };
     }
   | {
       type: 'search_result';
       data: {
+        id: string;
         query?: string;
         name?: string;
         results?: { title: string; url: string }[];
+        /** Tool / Tavily failure message when the search did not succeed. */
+        error?: string;
+        /** Optional machine-readable category (`search_timeout`, `search_unavailable`, …). */
+        code?: string;
       };
     }
+  | { type: 'url_read'; data: { url: string } }
   | {
       type: 'done';
       data: {
@@ -124,11 +131,12 @@ export function parseSseEvent(raw: string): ServerSseEvent | null {
       return null;
     case 'search_start':
     case 'search_update':
-      if (isRecord(parsed.data)) {
+      if (isRecord(parsed.data) && typeof parsed.data.id === 'string') {
         const d = parsed.data;
         return {
           type: t,
           data: {
+            id: d.id as string,
             query: typeof d.query === 'string' ? d.query : '',
             reason: typeof d.reason === 'string' ? d.reason : '',
             ...(typeof d.name === 'string' ? { name: d.name } : {}),
@@ -137,8 +145,24 @@ export function parseSseEvent(raw: string): ServerSseEvent | null {
       }
       return null;
     case 'search_result':
-      if (isRecord(parsed.data)) {
-        return { type: 'search_result', data: parsed.data };
+      if (isRecord(parsed.data) && typeof parsed.data.id === 'string') {
+        const d = parsed.data;
+        return {
+          type: 'search_result',
+          data: {
+            id: d.id as string,
+            ...(typeof d.query === 'string' ? { query: d.query } : {}),
+            ...(typeof d.name === 'string' ? { name: d.name } : {}),
+            ...(Array.isArray(d.results) ? { results: d.results as { title: string; url: string }[] } : {}),
+            ...(typeof d.error === 'string' ? { error: d.error } : {}),
+            ...(typeof d.code === 'string' ? { code: d.code } : {}),
+          },
+        };
+      }
+      return null;
+    case 'url_read':
+      if (isRecord(parsed.data) && typeof parsed.data.url === 'string') {
+        return { type: 'url_read', data: { url: parsed.data.url as string } };
       }
       return null;
     case 'done': {

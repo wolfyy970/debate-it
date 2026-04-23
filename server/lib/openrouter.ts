@@ -3,8 +3,10 @@ const KIMI_API_KEY = process.env.KIMI_API_KEY || '';
 
 import type { ToolDefinition, ToolCall } from './tools';
 import {
+  DEFAULT_VITE_DEV_PORT,
   GENERATE_RESPONSE_TIMEOUT_MS,
-  LLM_STREAM_TIMEOUT_MS,
+  LLM_STREAM_IDLE_MS,
+  LLM_STREAM_MAX_MS,
 } from './constants';
 import { streamEventsFromOpenAiSseResponse } from './chat-completion-sse';
 
@@ -14,6 +16,19 @@ export type { Message, StreamEvent } from './llm-types';
 
 function isKimiModel(model: string): boolean {
   return model.toLowerCase().includes('kimi') || model.toLowerCase().includes('moonshot');
+}
+
+/** Map UI / OpenRouter model ids to Moonshot `model` field (e.g. `moonshotai/kimi-k2.6` → `kimi-k2.6`). */
+function moonshotChatModelId(stored: string): string {
+  const m = stored.trim();
+  const lower = m.toLowerCase();
+  if (lower.startsWith('moonshotai/')) return m.slice('moonshotai/'.length);
+  return m.replace(/kimi-/i, '');
+}
+
+function kimiThinkingSupported(apiModel: string): boolean {
+  const s = apiModel.toLowerCase();
+  return /k2|thinking|kimi-k2/.test(s);
 }
 
 function hasApiKey(): boolean {
@@ -28,6 +43,14 @@ export interface ApiKeyStatus {
   hasAny: boolean;
   /** True when both an LLM provider and Tavily are configured — required to run a debate. */
   hasAllRequired: boolean;
+}
+
+/** OpenRouter `HTTP-Referer`; override with `OPENROUTER_HTTP_REFERER` or align via `VITE_DEV_PORT`. */
+function openRouterHttpReferer(): string {
+  const explicit = process.env.OPENROUTER_HTTP_REFERER?.trim();
+  if (explicit) return explicit;
+  const devPort = Number(process.env.VITE_DEV_PORT) || DEFAULT_VITE_DEV_PORT;
+  return `http://localhost:${devPort}`;
 }
 
 export function checkApiKeys(): ApiKeyStatus {
@@ -118,9 +141,10 @@ function buildStreamingRequestBody(
 /**
  * Stream a response from the LLM with tool support.
  */
-function composeStreamSignal(streamSignal?: AbortSignal): AbortSignal {
-  const timeout = AbortSignal.timeout(LLM_STREAM_TIMEOUT_MS);
-  return streamSignal != null ? AbortSignal.any([streamSignal, timeout]) : timeout;
+/** User cancel + max wall-clock per streaming request (idle is enforced inside the SSE reader). */
+function composeStreamingFetchSignal(streamSignal?: AbortSignal): AbortSignal {
+  const maxWall = AbortSignal.timeout(LLM_STREAM_MAX_MS);
+  return streamSignal != null ? AbortSignal.any([streamSignal, maxWall]) : maxWall;
 }
 
 export async function* streamWithTools(
@@ -133,12 +157,14 @@ export async function* streamWithTools(
     throw new Error('No API keys configured. Set OPENROUTER_API_KEY or KIMI_API_KEY.');
   }
 
-  const signal = composeStreamSignal(streamSignal);
+  const signal = composeStreamingFetchSignal(streamSignal);
 
-  if (isKimiModel(model) && KIMI_API_KEY) {
-    yield* streamKimiWithTools(model, messages, tools, signal);
-  } else if (OPENROUTER_API_KEY) {
+  // Prefer OpenRouter when configured so OpenRouter-hosted Kimi slugs (e.g. `moonshotai/kimi-k2.6`)
+  // are not silently routed to direct Moonshot just because `KIMI_API_KEY` is also set.
+  if (OPENROUTER_API_KEY) {
     yield* streamOpenRouterWithTools(model, messages, tools, signal);
+  } else if (isKimiModel(model) && KIMI_API_KEY) {
+    yield* streamKimiWithTools(model, messages, tools, signal);
   } else if (KIMI_API_KEY) {
     yield* streamKimiWithTools(model, messages, tools, signal);
   } else {
@@ -153,13 +179,18 @@ async function* streamOpenRouterWithTools(
   signal: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
   const body = buildStreamingRequestBody(model, messages, tools, model);
+  /**
+   * Ask OpenRouter for reasoning in the same SSE stream as content/tools.
+   * `max_tokens` maps across providers that use a reasoning budget (incl. many Kimi routes per OpenRouter docs).
+   */
+  body.reasoning = { max_tokens: 32_768, exclude: false };
 
   const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      'HTTP-Referer': 'http://localhost:5173',
+      'HTTP-Referer': openRouterHttpReferer(),
       'X-Title': 'Debater',
     },
     body: JSON.stringify(body),
@@ -171,7 +202,7 @@ async function* streamOpenRouterWithTools(
     throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
   }
 
-  yield* streamEventsFromOpenAiSseResponse(response);
+  yield* streamEventsFromOpenAiSseResponse(response, { idleMs: LLM_STREAM_IDLE_MS });
 }
 
 async function* streamKimiWithTools(
@@ -180,8 +211,11 @@ async function* streamKimiWithTools(
   tools: ToolDefinition[] | undefined,
   signal: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
-  const apiModel = model.replace('kimi-', '');
+  const apiModel = moonshotChatModelId(model);
   const body = buildStreamingRequestBody(model, messages, tools, apiModel);
+  if (kimiThinkingSupported(apiModel)) {
+    body.thinking = { type: 'enabled' };
+  }
 
   const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
     method: 'POST',
@@ -198,7 +232,7 @@ async function* streamKimiWithTools(
     throw new Error(`Kimi API error: ${response.status} - ${errorText}`);
   }
 
-  yield* streamEventsFromOpenAiSseResponse(response);
+  yield* streamEventsFromOpenAiSseResponse(response, { idleMs: LLM_STREAM_IDLE_MS });
 }
 
 export async function generateResponse(
@@ -229,7 +263,7 @@ export async function generateResponse(
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      'HTTP-Referer': 'http://localhost:5173',
+      'HTTP-Referer': openRouterHttpReferer(),
       'X-Title': 'Debater',
     },
     body: JSON.stringify(body),
@@ -259,17 +293,17 @@ You have access to two tools:
 
 Process:
 1. Consider what facts you need.
-2. Call search_web to get a set of results. Optionally call read_url on a URL from those results if a snippet is insufficient.
-3. Write your argument using what you learned.
+2. Call search_web to get a set of results. After search_web returns at least one URL, you MUST call read_url on at least one promising URL in this turn before writing your argument, unless a single snippet is unambiguous and directly answers the claim you need (in that rare case, say so in one short clause and cite it).
+3. Write your argument using what you learned (including from full-page reads where you used read_url).
 
 IMPORTANT: If search_web returns no results or fails, DO NOT retry endlessly. Proceed with general knowledge and clearly mark unverified claims as such.
 
 CITATION RULES:
-When you use information from a search result, you MUST cite it inline using bracketed numbers like [1], [2].
-- Each search result is numbered in the order it was returned.
+When you use information from a search result, cite inline using bracketed numbers like [1], [2] that match the bracketed prefix on each block in the search_web tool output (e.g. "[3] Title…").
+- Those numbers are stable indices into the debate's accumulated source list for this turn — use them exactly as shown; do not invent or renumber.
 - Cite immediately after the claim: "Studies show X is effective [1]."
 - If a claim uses multiple sources, cite all: "X and Y are linked [1][2]."
-- Only cite sources you actually used; do not invent citations.
+- Only cite sources you actually used from tool output; do not invent citations.
 
 Your argument should be 200-400 words in plain text paragraphs (no markdown).`;
 }

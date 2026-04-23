@@ -39,6 +39,42 @@ Editorial, serif-led aesthetic. Warm paper backgrounds with oxblood accent. Mini
 | `--fs-input` | 20px → 32px |
 | `--fs-hero` | 36px → 72px |
 
+## Responsive layout
+
+Numeric breakpoints live in [`src/theme/breakpoints.ts`](src/theme/breakpoints.ts) and match **`src/tokens.css`** utility media queries (`min-width: 641px`, `min-width: 1025px`).
+
+| Band | Viewport width | Typical use |
+|------|----------------|--------------|
+| **mobile** | `width < 641` | Single-column content grids; tight `TurnRow` gutters |
+| **tablet** | `641 ≤ width < 1025` | Multi-column *content* grids (e.g. 2 agent cards); **same shell as mobile** |
+| **desktop** | `width ≥ 1025` | **Split shell**: main column + fixed-width rail (Setup toggles, Landing hero aside) |
+
+**Shell vs content:** [`useBreakpoint()`](src/hooks/useBreakpoint.ts) exposes `stackShell` (`true` when not desktop). Use **`stackShell`** for page chrome (main + sidebar / hero columns). Keep **`isMobile` / `isTablet`** for *inner* grids (e.g. 1 vs 2 vs 3 cards on Setup) so tablets still get two columns where appropriate.
+
+### Per-page shell behavior
+
+```mermaid
+flowchart TB
+  subgraph setup [SetupPage]
+    S1["stackShell: main full width, Quick Toggles below"]
+    S2["desktop: main plus 340px rail"]
+  end
+  subgraph landing [LandingPage]
+    L1["stackShell: hero single column"]
+    L2["desktop: headline plus 320px column"]
+  end
+  subgraph live [LiveDebatePage]
+    V1["stackShell: single column turn stack"]
+    V2["desktop: same single column turn stack"]
+  end
+  subgraph synth [SynthesisPage]
+    Y1["stackShell: paired cards stack vertically"]
+    Y2["desktop: two-column argument grids"]
+  end
+```
+
+**Masthead:** Pass `compact={stackShell}` for smaller horizontal padding and wrapping on narrow viewports.
+
 ## Color Palette
 
 ### Light Theme (Default)
@@ -138,6 +174,13 @@ Sizes: `sm` (28px height), `md` (36px), `lg` (44px)
 - Dropdown with provider grouping
 - Chevron indicator
 - Color-coded by role
+
+### CitationRef
+
+- Inline bracketed reference (`[N]`) for debate sources; editorial **pill** styling with **zero border-radius**
+- Mono at ~0.85em; **accent underline** on hover/focus (`--cite-accent`, falls back to `--accent`)
+- **Popover** on hover/focus-within: `--paper-0` background, `--ink-900` title, snippet clamp, hostname in mono (preview only; **click `[N]`** to open the URL — no separate control in the popover); `.debater-cite-wrap` / `.debater-cite` / `.debater-cite-popover` in `tokens.css`
+- Unknown `N`: `.debater-cite--missing`, dimmed non-interactive text
 
 ## Responsive Tokens
 

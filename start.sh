@@ -25,6 +25,16 @@ fi
 # Create logs directory
 mkdir -p logs
 
+# Ports for status messages (defaults match server/lib/constants.ts; override in .env)
+API_PORT=38471
+APP_PORT=52817
+if [ -f .env ]; then
+  _p=$(grep -E '^PORT=' .env | head -1 | cut -d= -f2- | tr -d ' \r"' | tr -d "'")
+  _v=$(grep -E '^VITE_DEV_PORT=' .env | head -1 | cut -d= -f2- | tr -d ' \r"' | tr -d "'")
+  [ -n "$_p" ] && API_PORT="$_p"
+  [ -n "$_v" ] && APP_PORT="$_v"
+fi
+
 # Kill existing processes
 pkill -f "tsx server" 2>/dev/null
 pkill -f "vite" 2>/dev/null
@@ -46,9 +56,9 @@ if [ "$MODE" = "dev" ]; then
     
     echo ""
     echo -e "${GREEN}✅ Debater is running!${NC}"
-    echo -e "   API: http://localhost:3001"
-    echo -e "   App: http://localhost:5173"
-    echo -e "   Health: http://localhost:3001/health"
+    echo -e "   API: http://localhost:${API_PORT}"
+    echo -e "   App: http://localhost:${APP_PORT}"
+    echo -e "   Health: http://localhost:${API_PORT}/health"
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
     
@@ -70,9 +80,9 @@ elif [ "$MODE" = "prod" ]; then
     
     echo ""
     echo -e "${GREEN}✅ Debater is running in production mode!${NC}"
-    echo -e "   API: http://localhost:3001"
-    echo -e "   App: http://localhost:5173"
-    echo -e "   Health: http://localhost:3001/health"
+    echo -e "   API: http://localhost:${API_PORT}"
+    echo -e "   App: http://localhost:${APP_PORT}"
+    echo -e "   Health: http://localhost:${API_PORT}/health"
     echo ""
     echo -e "${YELLOW}Press Ctrl+C to stop${NC}"
     

@@ -1,7 +1,10 @@
 import { searchWeb } from '../../search';
 import type { Source } from '../../store';
 
-export async function runSearchWeb(args: Record<string, unknown>): Promise<{
+export async function runSearchWeb(
+  args: Record<string, unknown>,
+  streamSignal?: AbortSignal,
+): Promise<{
   content: string;
   sources: Source[];
 }> {
@@ -10,7 +13,7 @@ export async function runSearchWeb(args: Record<string, unknown>): Promise<{
     throw new Error('Missing required parameter: query');
   }
 
-  const results = await searchWeb(query, 5);
+  const results = await searchWeb(query, 5, streamSignal);
 
   if (results.length === 0) {
     return {

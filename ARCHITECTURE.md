@@ -5,7 +5,7 @@
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
 │   React SPA     │────▶│   Express API    │────▶│   LLM APIs      │
-│   (Vite dev)    │◄────│   (Port 3001)    │◄────│   (OpenRouter)  │
+│   (Vite dev)    │◄────│   (Port 38471*)  │◄────│   (OpenRouter)  │
 │                 │ SSE │                  │     │   (Kimi)        │
 │  - Landing      │     │  - Routes        │     └─────────────────┘
 │  - Setup        │     │  - Validation    │              │
@@ -15,6 +15,8 @@
                                                   │   (Search)      │
                                                   └─────────────────┘
 ```
+
+\*Default API port is **38471** (`PORT` / `DEFAULT_API_PORT`); Vite dev/preview defaults to **52817** (`VITE_DEV_PORT`). Override in `.env`.
 
 ## Frontend
 
@@ -33,7 +35,7 @@
 No global state library. Each page manages its own state:
 
 - **Landing** — `topic` input, suggestion navigation
-- **Setup** — `topic`, `selectedMode`, `agents[]`, `toggles`
+- **Setup** — `topic`, `selectedMode`, `agents[]`, `toggles`, `structure` (rounds, cross-ex, synthesis type; see `shared/debate-schedule.ts`)
 - **LiveDebate** — `useDebateSse` plus `debateSseReducer` fold SSE into debate snapshot, streaming text, reasoning, active searches, and control-plane state (cancel/retry, phase strip). `EventSource` lifecycle lives in the hook so reconnect and server job state stay aligned.
 - **Synthesis** — `debate`, `synthesis`
 
@@ -57,7 +59,7 @@ No global state library. Each page manages its own state:
 
 | Hook | File | Purpose |
 |------|------|---------|
-| `useBreakpoint` | `hooks/useBreakpoint.ts` | Responsive bucket: mobile, tablet, or desktop |
+| `useBreakpoint` | `hooks/useBreakpoint.ts` | Returns `bp`, `isMobile` / `isTablet` / `isDesktop`, and **`stackShell`** (stack main+rail below 1025px); thresholds in `theme/breakpoints.ts` align with `tokens.css` |
 | `useDebateSse` | `hooks/useDebateSse.ts` | SSE subscription to `/api/debates/:id/stream`; dispatches into `state/debateSseReducer.ts` |
 
 ## Backend
@@ -69,7 +71,7 @@ GET    /health              → Health check + API key status (`configured.{open
 POST   /api/debates         → Create debate (503 with `missing={llm,tavily}` if required keys are unset)
 GET    /api/debates/:id     → Get debate
 POST   /api/debates/:id/turns    → Add moderator question
-POST   /api/debates/:id/next     → Queue next turn (409 if a generation is already active)
+POST   /api/debates/:id/next     → Queue next turn (**409** if a generation is already active, or **`reason: schedule_complete`** when agent steps + `turnCap` are exhausted)
 GET    /api/debates/:id/stream   → SSE stream
 POST   /api/debates/:id/cancel   → Cancel generation
 POST   /api/debates/:id/retry    → Retry failed turn (409 if a generation is already active)
@@ -90,13 +92,14 @@ JSON file persistence layer:
 
 ReAct agent loop:
 - `DebateAgent` class
-- Async generator yields events: `text_delta`, `reasoning`, `tool_call_start`, `tool_call_delta`, `tool_call_end`, `search_results`, `done`, `error`
-- Max 5 iterations to prevent loops
+- Async generator yields events: `text_delta`, `reasoning`, `tool_call_start`, `tool_call_delta`, `tool_call_end`, `search_results`, `url_read`, `done`, `error`
+- Max **8** iterations (`MAX_AGENT_ITERATIONS`) to cap tool-heavy loops
+- **Forced prose pass**: if a turn would end with **no body text** (only tools/sources), the agent runs one more streaming call **with tools disabled** and a user nudge; if text is still empty, it yields **`error`** (`Model produced no argument`) instead of committing an empty turn
 - Parses search results into structured `Source` records for the store
 
 #### `lib/debate-phase.ts`
 
-Phase progression and “who speaks next” helpers shared by HTTP routes and the queue when a turn completes.
+Phase, round, and **next speaker** are driven by **`shared/debate-schedule.ts`**: `buildSchedule(structure)` defines segments (Opening, optional Cross-Ex, numbered Rebuttals, Final, terminal Synthesis); `flattenAgentSteps` is the ordered Advocate/Skeptic queue for `POST /next`. **`countCommittedAgentTurns`** ignores `meta` topic rows and moderator clarifications. `computePhaseAfterTurnCompletion` / `syncDebatePhaseFromTurns` update persisted debate state after each committed agent turn (or after retry pop / moderator `POST …/turns` resync). **`maxCommittedAgentTurns`** applies `structure.turnCap` as a hard ceiling.
 
 #### `lib/synthesis.ts`
 
@@ -105,21 +108,22 @@ Judge synthesis: message building, JSON extraction from model output, and a smal
 #### `lib/openrouter.ts`
 
 LLM streaming:
-- `streamWithTools()` — core streaming function (honors `AbortSignal` for cancel)
+- `streamWithTools()` — core streaming function; composes the job `AbortSignal` with a **hard max wall-clock** per HTTP stream (`LLM_STREAM_MAX_MS` in `constants.ts`, default 5 minutes) on the streaming `fetch` only
 - `streamOpenRouterWithTools()` — OpenRouter provider
 - `streamKimiWithTools()` — Kimi direct provider
 - `generateResponse()` — blocking mode for synthesis
 - `buildSystemPrompt()` — prompt construction
+- **Idle stall detection** — not on the `fetch` signal; enforced in `chat-completion-sse.ts` (see below)
 
 #### `lib/chat-completion-sse.ts`
 
-Low-level SSE framing parser for provider streams (shared test coverage with the client wire format).
+Low-level SSE framing parser for provider streams (shared test coverage with the client wire format). Enforces an **idle timeout** (`LLM_STREAM_IDLE_MS`, default **90s**): if no bytes arrive from the provider for that long, the body reader is cancelled and parsing throws a clear “stalled” error — so long gaps between tokens (e.g. reasoning models) do not trip a short **total** wall-clock on the whole stream.
 
 #### `lib/generation-queue.ts`
 
 Generation orchestration (singleton):
 - Job lifecycle: queued → generating → completed | error | cancelled, with `AbortController` wired through `DebateAgent` / fetches
-- Registers per-debate SSE listeners; emits typed `ServerSseEvent` payloads (chunks, reasoning, search UI, errors, `turn`, `phase-change`, `cancelled`)
+- Registers per-debate SSE listeners; emits typed `ServerSseEvent` payloads (chunks, reasoning, search UI for **`search_web`**, **`url_read`** for full-page fetch telemetry, errors, `turn`, `phase-change`, `cancelled`)
 - **Single writer for completed turns**: after a successful agent run, builds the `Turn`, runs `computePhaseAfterTurnCompletion`, persists via `DebateStore`, then notifies subscribers
 - `getActiveJob(debateId)` enables **409 Conflict** on `/next` and `/retry` when work is already in flight
 
@@ -132,7 +136,7 @@ Generation orchestration (singleton):
 #### `lib/search.ts`
 
 Tavily API wrapper:
-- `searchWeb()` — returns `SearchResult[]`; throws `SearchUnavailableError` when `TAVILY_API_KEY` is unset so the executor short-circuits instead of calling Tavily.
+- `searchWeb()` — returns `SearchResult[]`; throws `SearchUnavailableError` when `TAVILY_API_KEY` is unset; **propagates** HTTP/network/timeout failures (no silent `[]` on error). Optional `AbortSignal` is combined with `TAVILY_FETCH_TIMEOUT_MS` so job cancel aborts in-flight Tavily requests.
 - `hasTavilyKey()` — capability check used by the `checkApiKeys()` / route gate
 - `formatSearchResults()` — string formatting
 
@@ -140,8 +144,13 @@ Tavily API wrapper:
 
 Tool surface for the agent:
 - `definitions.ts` / `types.ts` — schema the model calls (`search_web`, `read_url`)
-- `executors/` — Tavily search and URL read implementations
-- `index.ts` — `executeTool` dispatcher
+- `executors/` — Tavily search and URL read implementations (honor optional cancel `AbortSignal` from `executeTool`)
+- `index.ts` — `executeTool(toolCall, { signal })` dispatcher
+
+#### `lib/debate-agent.ts` (search vs citations)
+
+- **SSE / UI** — each `search_results` event carries the **raw** hits returned for that tool call (so overlapping queries still show URLs in the live panel).
+- **Turn citations** — URLs are still **deduplicated** into `this.sources` for the persisted turn and `[n]` citation list.
 
 #### `lib/tokenizer.ts`
 
@@ -150,16 +159,16 @@ Token counting:
 
 #### `lib/constants.ts`
 
-Shared magic numbers (for example SSE heartbeat interval) imported by routes and tests.
+Shared magic numbers: SSE heartbeat, `LLM_STREAM_IDLE_MS` / `LLM_STREAM_MAX_MS`, Tavily fetch timeout, `MAX_AGENT_ITERATIONS`, etc. — imported by routes, openrouter, chat-completion-sse, and tests.
 
-#### `shared/domain.ts`
+#### `shared/domain.ts` / `shared/debate-schedule.ts`
 
-Cross-tier domain types (re-exported or mirrored on client where needed).
+Cross-tier domain types (`domain.ts`) and **debate schedule** math (`debate-schedule.ts`; re-exported to the SPA as `src/lib/debateSchedule.ts`).
 
 ### Data Flow
 
 ```
-User clicks "Next" → POST /api/debates/:id/next (409 if queue already active)
+User clicks "Next" → POST /api/debates/:id/next (409 if queue already active or `schedule_complete`)
     ↓
 GenerationQueue.enqueue()
     ↓

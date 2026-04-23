@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 interface ButtonProps {
   children: ReactNode;
@@ -7,8 +7,9 @@ interface ButtonProps {
   icon?: ReactNode;
   onClick?: () => void;
   full?: boolean;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
   disabled?: boolean;
+  className?: string;
 }
 
 export function Button({
@@ -20,48 +21,25 @@ export function Button({
   full,
   style = {},
   disabled,
+  className: classNameProp,
 }: ButtonProps) {
-  const variants = {
-    primary: { bg: 'var(--ink-900)', fg: 'var(--paper)', bd: 'var(--ink-900)' },
-    secondary: { bg: 'transparent', fg: 'var(--ink-900)', bd: 'var(--ink-900)' },
-    ghost: { bg: 'transparent', fg: 'var(--ink-700)', bd: 'transparent' },
-    accent: { bg: 'var(--accent)', fg: 'var(--accent-ink)', bd: 'var(--accent)' },
-  };
-
-  const sizes = {
-    sm: { h: 28, px: 12, fs: 12 },
-    md: { h: 36, px: 18, fs: 13 },
-    lg: { h: 48, px: 28, fs: 14 },
-  };
-
-  const v = variants[variant];
-  const sz = sizes[size];
+  const className = [
+    'debater-btn',
+    `debater-btn--${variant}`,
+    `debater-btn--${size}`,
+    full && 'debater-btn--full',
+    classNameProp,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <button
+      type="button"
+      className={className}
       onClick={onClick}
       disabled={disabled}
-      style={{
-        height: sz.h,
-        padding: `0 ${sz.px}px`,
-        fontFamily: 'var(--font-ui)',
-        fontSize: sz.fs,
-        fontWeight: 500,
-        letterSpacing: '0.04em',
-        textTransform: 'uppercase',
-        background: v.bg,
-        color: v.fg,
-        border: `1px solid ${v.bd}`,
-        borderRadius: 0,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        width: full ? '100%' : 'auto',
-        justifyContent: 'center',
-        ...style,
-      }}
+      style={style}
     >
       {children}
       {icon && <span>{icon}</span>}

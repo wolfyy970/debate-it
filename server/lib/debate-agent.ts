@@ -204,30 +204,32 @@ export class DebateAgent {
                   
                   const result = await executeTool(toolCall);
 
-                  if (result.toolName === 'search_web' && !result.isError && result.sources?.length) {
+                  if (result.toolName === 'search_web') {
                     const added: Source[] = [];
-                    for (const s of result.sources) {
-                      if (
-                        s.url &&
-                        s.url.startsWith('http') &&
-                        !this.sources.find((x) => x.url === s.url)
-                      ) {
-                        this.sourceCounter++;
-                        const entry: Source = {
-                          title: s.title,
-                          url: s.url,
-                          snippet: s.snippet,
-                        };
-                        this.sources.push(entry);
-                        added.push(entry);
+                    if (!result.isError && result.sources?.length) {
+                      for (const s of result.sources) {
+                        if (
+                          s.url &&
+                          s.url.startsWith('http') &&
+                          !this.sources.find((x) => x.url === s.url)
+                        ) {
+                          this.sourceCounter++;
+                          const entry: Source = {
+                            title: s.title,
+                            url: s.url,
+                            snippet: s.snippet,
+                          };
+                          this.sources.push(entry);
+                          added.push(entry);
+                        }
                       }
                     }
-                    if (added.length > 0) {
-                      yield {
-                        type: 'search_results',
-                        sources: added,
-                      };
-                    }
+                    // Always emit so the UI closes the "searching" indicator,
+                    // even when the tool returned no results or errored.
+                    yield {
+                      type: 'search_results',
+                      sources: added,
+                    };
                   }
                   
                   // Add tool result to messages

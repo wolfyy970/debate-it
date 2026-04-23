@@ -68,18 +68,24 @@ describe('tools', () => {
       expect(result.content).toContain('Missing required parameter');
     });
 
-    it('returns successful result structure', async () => {
-      // With no TAVILY_API_KEY, search should return fallback
-      const result = await executeTool({
-        id: 'test_4',
-        name: 'search_web',
-        arguments: { query: 'test', reason: 'testing' },
-      });
+    it('returns isError when search_web runs without TAVILY_API_KEY', async () => {
+      const prev = process.env.TAVILY_API_KEY;
+      delete process.env.TAVILY_API_KEY;
+      try {
+        const result = await executeTool({
+          id: 'test_4',
+          name: 'search_web',
+          arguments: { query: 'test', reason: 'testing' },
+        });
 
-      expect(result.toolName).toBe('search_web');
-      expect(result.toolCallId).toBe('test_4');
-      expect(result.isError).toBe(false);
-      expect(Array.isArray(result.sources)).toBe(true);
+        expect(result.toolName).toBe('search_web');
+        expect(result.toolCallId).toBe('test_4');
+        expect(result.isError).toBe(true);
+        expect(result.content).toMatch(/tavily|search is not configured/i);
+      } finally {
+        if (prev === undefined) delete process.env.TAVILY_API_KEY;
+        else process.env.TAVILY_API_KEY = prev;
+      }
     });
   });
 });

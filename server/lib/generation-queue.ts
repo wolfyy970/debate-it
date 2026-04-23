@@ -125,10 +125,13 @@ class GenerationQueue extends EventEmitter {
             break;
 
           case 'tool_call_end':
+            // Finalize the query on the UI (args are fully parsed here);
+            // the actual execution result is emitted later via `search_results`.
             this.emitSSE(debateId, {
-              type: 'search_result',
+              type: 'search_update',
               data: {
                 query: (event.toolCall?.arguments?.query as string) || '',
+                reason: (event.toolCall?.arguments?.reason as string) || '',
                 name: event.toolCall?.name || '',
               },
             });
@@ -138,17 +141,15 @@ class GenerationQueue extends EventEmitter {
             break;
 
           case 'search_results':
-            if (event.sources && event.sources.length > 0) {
-              this.emitSSE(debateId, {
-                type: 'search_result',
-                data: {
-                  results: event.sources.map((s) => ({
-                    title: s.title,
-                    url: s.url,
-                  })),
-                },
-              });
-            }
+            this.emitSSE(debateId, {
+              type: 'search_result',
+              data: {
+                results: (event.sources ?? []).map((s) => ({
+                  title: s.title,
+                  url: s.url,
+                })),
+              },
+            });
             break;
 
           case 'done':

@@ -21,6 +21,7 @@ import type {
 import { getRoleColorToken } from '../theme/roleColors';
 import { DEBATE_MODES, AGENT_STYLES } from '../types';
 import { SetupSidebar } from './SetupSidebar';
+import { missingKeysErrorPath, parseMissingKeys } from '../lib/apiErrors';
 
 interface AgentConfig {
   id: string;
@@ -85,7 +86,8 @@ export function SetupPage() {
       
       if (!response.ok) {
         if (response.status === 503) {
-          navigate('/error?reason=no-api-keys');
+          const missing = await parseMissingKeys(response);
+          navigate(missingKeysErrorPath(missing));
           return;
         }
         const errorData = await response.json().catch(() => ({}));

@@ -20,11 +20,25 @@ function hasApiKey(): boolean {
   return !!(OPENROUTER_API_KEY || KIMI_API_KEY);
 }
 
-export function checkApiKeys(): { openrouter: boolean; kimi: boolean; hasAny: boolean } {
+export interface ApiKeyStatus {
+  openrouter: boolean;
+  kimi: boolean;
+  tavily: boolean;
+  /** True when at least one LLM provider key is set. */
+  hasAny: boolean;
+  /** True when both an LLM provider and Tavily are configured — required to run a debate. */
+  hasAllRequired: boolean;
+}
+
+export function checkApiKeys(): ApiKeyStatus {
+  const tavily = !!process.env.TAVILY_API_KEY;
+  const hasAny = hasApiKey();
   return {
     openrouter: !!OPENROUTER_API_KEY,
     kimi: !!KIMI_API_KEY,
-    hasAny: hasApiKey(),
+    tavily,
+    hasAny,
+    hasAllRequired: hasAny && tavily,
   };
 }
 
@@ -239,26 +253,23 @@ export function buildSystemPrompt(role: string, style: string, topic: string, ph
 Style: ${style}
 Phase: ${phase} (Round ${round})
 
-You have access to tools to search the web for facts. Use them when you need to:
-- Verify statistical claims
-- Find evidence for arguments
-- Check the validity of sources or studies
-- Research counterarguments
+You have access to two tools:
+- search_web: the only way to obtain external evidence. Use it to verify statistical claims, find studies, check sources, or research counterarguments.
+- read_url: ONLY use with a URL that was returned by a prior search_web result in this conversation. Do not invent URLs from memory; any URL you did not receive from search_web must be treated as a hypothesis, not a source.
 
 Process:
-1. Consider what facts you need
-2. Use search_web or read_url tools as needed
-3. After gathering evidence, write your argument
+1. Consider what facts you need.
+2. Call search_web to get a set of results. Optionally call read_url on a URL from those results if a snippet is insufficient.
+3. Write your argument using what you learned.
 
-IMPORTANT: If a search returns no results or fails, DO NOT keep searching. Proceed with your argument using general knowledge and reasoning. Do not get stuck in a search loop.
+IMPORTANT: If search_web returns no results or fails, DO NOT retry endlessly. Proceed with general knowledge and clearly mark unverified claims as such.
 
 CITATION RULES:
-When you use information from a search result, you MUST cite it inline using bracketed numbers like [1], [2], etc.
-- Each search result is numbered in the order it was returned
+When you use information from a search result, you MUST cite it inline using bracketed numbers like [1], [2].
+- Each search result is numbered in the order it was returned.
 - Cite immediately after the claim: "Studies show X is effective [1]."
 - If a claim uses multiple sources, cite all: "X and Y are linked [1][2]."
-- Only cite sources you actually used in your argument
-- Do not invent citations or cite sources you did not receive
+- Only cite sources you actually used; do not invent citations.
 
 Your argument should be 200-400 words in plain text paragraphs (no markdown).`;
 }

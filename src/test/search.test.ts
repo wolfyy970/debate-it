@@ -1,7 +1,34 @@
-import { describe, it, expect } from 'vitest';
-import { formatSearchResults } from '../../server/lib/search';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import {
+  formatSearchResults,
+  searchWeb,
+  SearchUnavailableError,
+  hasTavilyKey,
+} from '../../server/lib/search';
 
 describe('search', () => {
+  describe('hasTavilyKey / searchWeb without a key', () => {
+    const prev = process.env.TAVILY_API_KEY;
+
+    afterEach(() => {
+      if (prev === undefined) delete process.env.TAVILY_API_KEY;
+      else process.env.TAVILY_API_KEY = prev;
+      vi.restoreAllMocks();
+    });
+
+    it('reports no Tavily key and refuses to call Tavily', async () => {
+      delete process.env.TAVILY_API_KEY;
+      expect(hasTavilyKey()).toBe(false);
+
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('{}', { status: 200 }),
+      );
+
+      await expect(searchWeb('anything')).rejects.toBeInstanceOf(SearchUnavailableError);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+  });
+
   describe('formatSearchResults', () => {
     it('formats search results with citations', () => {
       const results = [

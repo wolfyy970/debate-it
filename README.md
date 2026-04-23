@@ -52,7 +52,9 @@ npm run test:watch # Run tests in watch mode
 
 ## API Keys Required
 
-- **OpenRouter** (`OPENROUTER_API_KEY`) or **Kimi** (`KIMI_API_KEY`) — LLM access
-- **Tavily** (`TAVILY_API_KEY`) — Optional, enables web search
+Both an LLM provider key and a Tavily key are required to run a debate. The server returns **503** with `{ missing: { llm, tavily } }` until both are present.
+
+- **OpenRouter** (`OPENROUTER_API_KEY`) **or** **Kimi** (`KIMI_API_KEY`) — LLM access
+- **Tavily** (`TAVILY_API_KEY`) — web search for agent fact-checking (no Tavily, no debate)
 
 See [USER_GUIDE.md](USER_GUIDE.md) for detailed setup.

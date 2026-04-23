@@ -8,6 +8,7 @@ import { useDebateSse } from '../hooks/useDebateSse';
 import type { AgentRole } from '../types';
 import { getRoleColorToken } from '../theme/roleColors';
 import { AUTO_ADVANCE_MS } from '../lib/constants';
+import { missingKeysErrorPath, parseMissingKeys } from '../lib/apiErrors';
 import {
   debateLiveReducer,
   getInitialDebateLiveUiState,
@@ -83,7 +84,8 @@ export function LiveDebatePage() {
       const response = await fetch(`/api/debates/${id}/next`, { method: 'POST' });
 
       if (response.status === 503) {
-        navigate('/error?reason=no-api-keys');
+        const missing = await parseMissingKeys(response);
+        navigate(missingKeysErrorPath(missing));
         dispatch({ type: 'NEXT_FAIL', message: 'Service unavailable' });
         return;
       }
@@ -167,7 +169,8 @@ export function LiveDebatePage() {
       const response = await fetch(`/api/debates/${id}/retry`, { method: 'POST' });
 
       if (response.status === 503) {
-        navigate('/error?reason=no-api-keys');
+        const missing = await parseMissingKeys(response);
+        navigate(missingKeysErrorPath(missing));
         dispatch({ type: 'RETRY_FAIL', message: 'Service unavailable' });
         return;
       }

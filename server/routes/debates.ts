@@ -16,6 +16,28 @@ import { writeSseData } from '../lib/sse-writer.js';
 
 const router = Router();
 
+/**
+ * 503 helper for the two required capability gates (LLM + Tavily).
+ * Response body includes `missing: { llm, tavily }` so the client
+ * can route to a specific error view.
+ */
+function sendMissingKeysError(
+  res: Response,
+  keys: { hasAny: boolean; tavily: boolean },
+): void {
+  const missing = { llm: !keys.hasAny, tavily: !keys.tavily };
+  const parts: string[] = [];
+  if (missing.llm) parts.push('an LLM provider key (OPENROUTER_API_KEY or KIMI_API_KEY)');
+  if (missing.tavily) parts.push('TAVILY_API_KEY');
+  sendApiError(
+    res,
+    503,
+    'Service Unavailable',
+    `Required API keys missing: ${parts.join(' and ')}.`,
+    { missing },
+  );
+}
+
 // Create new debate
 router.post(
   '/',
@@ -47,15 +69,9 @@ router.post(
         }
       }
 
-      // Check API keys
       const keys = checkApiKeys();
-      if (!keys.hasAny) {
-        return sendApiError(
-          res,
-          503,
-          'Service Unavailable',
-          'No LLM API keys configured. Set OPENROUTER_API_KEY or KIMI_API_KEY.',
-        );
+      if (!keys.hasAllRequired) {
+        return sendMissingKeysError(res, keys);
       }
 
       const debate = createDebateInstance({
@@ -151,15 +167,9 @@ router.post('/:id/next', validateId, async (req: Request, res: Response) => {
       });
     }
 
-    // Check API keys
     const keys = checkApiKeys();
-    if (!keys.hasAny) {
-      return sendApiError(
-        res,
-        503,
-        'Service Unavailable',
-        'No LLM API keys configured. Set OPENROUTER_API_KEY or KIMI_API_KEY.',
-      );
+    if (!keys.hasAllRequired) {
+      return sendMissingKeysError(res, keys);
     }
 
     const nextAgent = resolveNextAgentForTurn(debate);
@@ -257,15 +267,9 @@ router.post('/:id/retry', validateId, async (req: Request, res: Response) => {
       return sendApiError(res, 400, 'Validation Error', 'Debate is not live');
     }
 
-    // Check API keys
     const keys = checkApiKeys();
-    if (!keys.hasAny) {
-      return sendApiError(
-        res,
-        503,
-        'Service Unavailable',
-        'No LLM API keys configured. Set OPENROUTER_API_KEY or KIMI_API_KEY.',
-      );
+    if (!keys.hasAllRequired) {
+      return sendMissingKeysError(res, keys);
     }
 
     const queue = getGenerationQueue();

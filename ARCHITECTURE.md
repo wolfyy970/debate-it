@@ -65,8 +65,8 @@ No global state library. Each page manages its own state:
 ### Routes
 
 ```
-GET    /health              → Health check + API key status
-POST   /api/debates         → Create debate
+GET    /health              → Health check + API key status (`configured.{openrouter,kimi,tavily}`, `hasAllRequired`, `persistence.loadError`)
+POST   /api/debates         → Create debate (503 with `missing={llm,tavily}` if required keys are unset)
 GET    /api/debates/:id     → Get debate
 POST   /api/debates/:id/turns    → Add moderator question
 POST   /api/debates/:id/next     → Queue next turn (409 if a generation is already active)
@@ -132,8 +132,8 @@ Generation orchestration (singleton):
 #### `lib/search.ts`
 
 Tavily API wrapper:
-- `searchWeb()` — returns `SearchResult[]`
-- Fallback message when API key missing
+- `searchWeb()` — returns `SearchResult[]`; throws `SearchUnavailableError` when `TAVILY_API_KEY` is unset so the executor short-circuits instead of calling Tavily.
+- `hasTavilyKey()` — capability check used by the `checkApiKeys()` / route gate
 - `formatSearchResults()` — string formatting
 
 #### `lib/tools/`

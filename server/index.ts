@@ -15,15 +15,20 @@ function validateEnvironment(): void {
   const keys = checkApiKeys();
 
   if (!keys.hasAny) {
-    console.warn('⚠️  WARNING: No API keys configured (OPENROUTER_API_KEY or KIMI_API_KEY)');
-    console.warn('   Debates cannot be started without an API key. Set an API key to enable LLM responses.');
+    console.warn('⚠️  WARNING: No LLM API key configured (OPENROUTER_API_KEY or KIMI_API_KEY).');
   } else {
-    if (keys.openrouter) {
-      console.log('✅ OpenRouter API key configured');
-    }
-    if (keys.kimi) {
-      console.log('✅ Kimi API key configured');
-    }
+    if (keys.openrouter) console.log('✅ OpenRouter API key configured');
+    if (keys.kimi) console.log('✅ Kimi API key configured');
+  }
+
+  if (!keys.tavily) {
+    console.warn('⚠️  WARNING: TAVILY_API_KEY not configured. Debater requires Tavily for agent search.');
+  } else {
+    console.log('✅ Tavily API key configured');
+  }
+
+  if (!keys.hasAllRequired) {
+    console.warn('   Debates cannot be started until all required keys are set.');
   }
 }
 
@@ -64,8 +69,10 @@ app.get('/health', (req, res) => {
     configured: {
       openrouter: keys.openrouter,
       kimi: keys.kimi,
+      tavily: keys.tavily,
     },
     hasAnyKey: keys.hasAny,
+    hasAllRequired: keys.hasAllRequired,
     persistence: {
       loadError: getDebateStore().getLastLoadError(),
     },

@@ -33,6 +33,8 @@ describe('POST /api/debates/:id/retry', () => {
       hasAny: true,
       openrouter: true,
       kimi: false,
+      tavily: true,
+      hasAllRequired: true,
     });
 
     const debate = createDebateInstance({

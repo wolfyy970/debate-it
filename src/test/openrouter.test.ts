@@ -20,7 +20,25 @@ describe('openrouter', () => {
       const keys = checkApiKeys();
       expect(keys.openrouter).toBe(false);
       expect(keys.kimi).toBe(false);
+      expect(keys.tavily).toBe(false);
       expect(keys.hasAny).toBe(false);
+      expect(keys.hasAllRequired).toBe(false);
+    });
+
+    it('reports hasAllRequired only when an LLM key and Tavily are present', () => {
+      const prevTav = process.env.TAVILY_API_KEY;
+      process.env.TAVILY_API_KEY = 'tav-key';
+      try {
+        // openrouter.ts captured the LLM key at module load as '' — so hasAny stays false
+        // and hasAllRequired stays false even with Tavily set. That's the contract:
+        // both capabilities must be present.
+        const keys = checkApiKeys();
+        expect(keys.tavily).toBe(true);
+        expect(keys.hasAllRequired).toBe(keys.hasAny && keys.tavily);
+      } finally {
+        if (prevTav === undefined) delete process.env.TAVILY_API_KEY;
+        else process.env.TAVILY_API_KEY = prevTav;
+      }
     });
   });
 
@@ -104,7 +122,7 @@ describe('openrouter', () => {
 
       expect(prompt).toContain('CITATION RULES');
       expect(prompt).toContain('[1]');
-      expect(prompt).toContain('Do not invent citations');
+      expect(prompt).toMatch(/do not invent citations/i);
     });
 
     it('includes tool usage instructions', () => {
@@ -112,6 +130,12 @@ describe('openrouter', () => {
 
       expect(prompt).toContain('search_web');
       expect(prompt).toContain('read_url');
+    });
+
+    it('tells the model not to invent URLs for read_url', () => {
+      const prompt = buildSystemPrompt('Advocate', 'data-driven', 'Test', 'Opening', 1);
+      expect(prompt).toMatch(/do not invent urls/i);
+      expect(prompt).toMatch(/returned by a prior search_web/i);
     });
 
     it('specifies word count and format', () => {

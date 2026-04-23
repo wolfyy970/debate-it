@@ -57,6 +57,58 @@ describe('applySseEvent', () => {
     expect(next.generationError).toBe('boom');
     expect(next.isAdvancing).toBe(false);
   });
+
+  it('search_start → search_update fills in the final query', () => {
+    const state = { ...getInitialDebateLiveUiState(), debate: { ...baseDebate } };
+    let s = applySseEvent(state, {
+      type: 'search_start',
+      data: { query: '', reason: '', name: 'search_web' },
+    });
+    expect(s.activeSearches).toHaveLength(1);
+    expect(s.activeSearches[0].status).toBe('searching');
+    expect(s.activeSearches[0].query).toBe('');
+
+    s = applySseEvent(s, {
+      type: 'search_update',
+      data: { query: 'does universal basic income work', reason: 'verifying', name: 'search_web' },
+    });
+    expect(s.activeSearches[0].query).toBe('does universal basic income work');
+    expect(s.activeSearches[0].status).toBe('searching');
+  });
+
+  it('search_result closes the search with results attached', () => {
+    let s = applySseEvent(
+      { ...getInitialDebateLiveUiState(), debate: { ...baseDebate } },
+      { type: 'search_start', data: { query: '', reason: '', name: 'search_web' } },
+    );
+    s = applySseEvent(s, {
+      type: 'search_update',
+      data: { query: 'final query', reason: '', name: 'search_web' },
+    });
+    s = applySseEvent(s, {
+      type: 'search_result',
+      data: {
+        results: [{ title: 'A study', url: 'https://example.com/a' }],
+      },
+    });
+
+    expect(s.activeSearches).toHaveLength(1);
+    expect(s.activeSearches[0].status).toBe('done');
+    expect(s.activeSearches[0].query).toBe('final query');
+    expect(s.activeSearches[0].results).toEqual([
+      { title: 'A study', url: 'https://example.com/a' },
+    ]);
+  });
+
+  it('search_result with empty results still closes the search', () => {
+    let s = applySseEvent(
+      { ...getInitialDebateLiveUiState(), debate: { ...baseDebate } },
+      { type: 'search_start', data: { query: 'q', reason: '', name: 'search_web' } },
+    );
+    s = applySseEvent(s, { type: 'search_result', data: { results: [] } });
+    expect(s.activeSearches[0].status).toBe('done');
+    expect(s.activeSearches[0].results).toEqual([]);
+  });
 });
 
 describe('debateLiveReducer', () => {

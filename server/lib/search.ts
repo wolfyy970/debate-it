@@ -1,7 +1,5 @@
 import { TAVILY_FETCH_TIMEOUT_MS } from './constants';
 
-const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
-
 export interface SearchResult {
   title: string;
   url: string;
@@ -9,16 +7,21 @@ export interface SearchResult {
   score: number;
 }
 
+export class SearchUnavailableError extends Error {
+  constructor(message = 'Web search is not configured (TAVILY_API_KEY missing).') {
+    super(message);
+    this.name = 'SearchUnavailableError';
+  }
+}
+
+export function hasTavilyKey(): boolean {
+  return !!process.env.TAVILY_API_KEY;
+}
+
 export async function searchWeb(query: string, maxResults: number = 5): Promise<SearchResult[]> {
-  if (!TAVILY_API_KEY) {
-    console.warn('TAVILY_API_KEY not set, search unavailable');
-    // Return a special result that tells the LLM search is disabled
-    return [{
-      title: 'Search unavailable',
-      url: '',
-      content: 'Web search is not configured. Proceed with your argument using general knowledge.',
-      score: 0,
-    }];
+  const apiKey = process.env.TAVILY_API_KEY || '';
+  if (!apiKey) {
+    throw new SearchUnavailableError();
   }
 
   try {
@@ -29,7 +32,7 @@ export async function searchWeb(query: string, maxResults: number = 5): Promise<
       },
       signal: AbortSignal.timeout(TAVILY_FETCH_TIMEOUT_MS),
       body: JSON.stringify({
-        api_key: TAVILY_API_KEY,
+        api_key: apiKey,
         query,
         max_results: maxResults,
         search_depth: 'advanced',

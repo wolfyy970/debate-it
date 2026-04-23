@@ -26,11 +26,11 @@ cp example.env .env
 |----------|----------|---------|-------------|
 | `OPENROUTER_API_KEY` | Yes* | — | OpenRouter API key |
 | `KIMI_API_KEY` | Yes* | — | Kimi/Moonshot direct API key |
-| `TAVILY_API_KEY` | No | — | Tavily search API (optional but recommended) |
+| `TAVILY_API_KEY` | Yes | — | Tavily search API. Required — agents must be able to search the web. |
 | `PORT` | No | 3001 | Server port |
 | `VITE_API_URL` | No | http://localhost:3001 | Frontend API URL |
 
-*At least one LLM API key required
+*At least one LLM API key required, plus `TAVILY_API_KEY`. If either is missing the app routes to an error screen instead of starting a debate.
 
 ### Starting the App
 
@@ -119,9 +119,12 @@ curl http://localhost:3001/health
 
 The JSON response includes `persistence.loadError`. If that field is non-null, the server started but the debates file failed to load (see **Data not persisting** below); new debates may still be created, but existing data could be missing until the file is repaired.
 
+### Debate won't start / redirects to an error page
+
+Hit `/health` — if `configured.tavily` or `hasAnyKey` is false, the server refuses to create or advance debates. Set the missing keys in `.env` and restart.
+
 ### Agents generate empty responses
 
-- Check `TAVILY_API_KEY` is set (search works better with it)
 - Check OpenRouter/Kimi API key is valid
 - Check server logs: `cat /tmp/server.log`
 

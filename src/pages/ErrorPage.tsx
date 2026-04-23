@@ -6,17 +6,28 @@ export function ErrorPage() {
   const navigate = useNavigate();
   const reason = searchParams.get('reason');
 
+  const missingLlm = searchParams.get('llm') === '1';
+  const missingTavily = searchParams.get('tavily') === '1';
+
   const getErrorContent = () => {
     switch (reason) {
-      case 'no-api-keys':
+      case 'missing-keys':
+      case 'no-api-keys': {
+        const llm = missingLlm || reason === 'no-api-keys';
+        const tavily = missingTavily;
+        const bits: string[] = [];
+        if (llm) bits.push('an LLM provider key (OpenRouter or Kimi)');
+        if (tavily) bits.push('a Tavily search key');
+        const list = bits.length ? bits.join(' and ') : 'required API keys';
         return {
           title: 'Unable to start debate',
-          message: 'No LLM API keys are configured. Debater requires either an OpenRouter API key or a Kimi API key to generate responses.',
+          message: `Debater requires ${list} to run. Set the missing keys in .env and restart the server.`,
           action: {
             label: 'View Setup Instructions',
             onClick: () => window.open('https://github.com/anomalyco/debate-it#setup', '_blank'),
           },
         };
+      }
       case 'invalid-debate':
         return {
           title: 'Debate not found',
@@ -164,6 +175,8 @@ export function ErrorPage() {
               OPENROUTER_API_KEY=your_key_here
               <br />
               KIMI_API_KEY=your_key_here
+              <br />
+              TAVILY_API_KEY=your_key_here
             </div>
             <div style={{ marginBottom: 8 }}>3. Restart the server</div>
             <div style={{ 

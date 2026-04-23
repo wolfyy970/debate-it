@@ -57,4 +57,6 @@ Both an LLM provider key and a Tavily key are required to run a debate. The serv
 - **OpenRouter** (`OPENROUTER_API_KEY`) **or** **Kimi** (`KIMI_API_KEY`) — LLM access
 - **Tavily** (`TAVILY_API_KEY`) — web search for agent fact-checking (no Tavily, no debate)
 
+Optional **`VITE_API_URL`** in `.env` points the SPA at a separate API host (all `fetch` and `EventSource` use it). Leave unset for same-origin or the Vite dev proxy.
+
 See [USER_GUIDE.md](USER_GUIDE.md) for detailed setup.

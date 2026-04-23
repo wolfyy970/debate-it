@@ -21,6 +21,7 @@ import type {
 import { getRoleColorToken } from '../theme/roleColors';
 import { DEBATE_MODES, AGENT_STYLES } from '../types';
 import { SetupSidebar } from './SetupSidebar';
+import { apiUrl } from '../lib/apiBase';
 import { missingKeysErrorPath, parseMissingKeys } from '../lib/apiErrors';
 
 interface AgentConfig {
@@ -78,7 +79,7 @@ export function SetupPage() {
     };
 
     try {
-      const response = await fetch('/api/debates', {
+      const response = await fetch(apiUrl('/api/debates'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(debateData),

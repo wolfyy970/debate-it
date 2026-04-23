@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Masthead, Eyebrow, Byline, Button, Card } from '../components';
 import { useBreakpoint } from '../hooks/useBreakpoint';
+import { apiUrl } from '../lib/apiBase';
 import type { Turn } from '../types';
 
 export function SynthesisPage() {
@@ -23,7 +24,7 @@ export function SynthesisPage() {
 
   useEffect(() => {
     if (id) {
-      fetch(`/api/debates/${id}`)
+      fetch(apiUrl(`/api/debates/${id}`))
         .then(res => res.json())
         .then(setDebate)
         .catch(console.error);

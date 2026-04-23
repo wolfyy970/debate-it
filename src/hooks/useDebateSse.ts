@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, type Dispatch } from 'react';
+import { apiUrl } from '../lib/apiBase';
 import { parseSseEvent } from '../lib/sseEvents';
 import type { DebateLiveAction } from '../state/debateSseReducer';
 import { SSE_RECONNECT_BASE_MS, SSE_RECONNECT_MAX_MS } from '../lib/constants';
@@ -24,7 +25,7 @@ export function useDebateSse(
 
     setConnectionStatus('connecting');
 
-    const es = new EventSource(`/api/debates/${id}/stream`);
+    const es = new EventSource(apiUrl(`/api/debates/${id}/stream`));
     eventSourceRef.current = es;
 
     es.onopen = () => {

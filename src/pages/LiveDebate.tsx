@@ -8,6 +8,7 @@ import { useDebateSse } from '../hooks/useDebateSse';
 import type { AgentRole } from '../types';
 import { getRoleColorToken } from '../theme/roleColors';
 import { AUTO_ADVANCE_MS } from '../lib/constants';
+import { apiUrl } from '../lib/apiBase';
 import { missingKeysErrorPath, parseMissingKeys } from '../lib/apiErrors';
 import {
   debateLiveReducer,
@@ -51,7 +52,7 @@ export function LiveDebatePage() {
   const fetchDebate = useCallback(async () => {
     if (!id) return;
     try {
-      const response = await fetch(`/api/debates/${id}`);
+      const response = await fetch(apiUrl(`/api/debates/${id}`));
       if (response.ok) {
         const data = await response.json();
         dispatch({
@@ -81,7 +82,7 @@ export function LiveDebatePage() {
     dispatch({ type: 'NEXT_START' });
 
     try {
-      const response = await fetch(`/api/debates/${id}/next`, { method: 'POST' });
+      const response = await fetch(apiUrl(`/api/debates/${id}/next`), { method: 'POST' });
 
       if (response.status === 503) {
         const missing = await parseMissingKeys(response);
@@ -153,7 +154,7 @@ export function LiveDebatePage() {
     if (!id) return;
 
     try {
-      await fetch(`/api/debates/${id}/cancel`, { method: 'POST' });
+      await fetch(apiUrl(`/api/debates/${id}/cancel`), { method: 'POST' });
       dispatch({ type: 'RESET_STREAM_UI' });
     } catch (error) {
       console.error('Failed to cancel:', error);
@@ -166,7 +167,7 @@ export function LiveDebatePage() {
     dispatch({ type: 'RETRY_START' });
 
     try {
-      const response = await fetch(`/api/debates/${id}/retry`, { method: 'POST' });
+      const response = await fetch(apiUrl(`/api/debates/${id}/retry`), { method: 'POST' });
 
       if (response.status === 503) {
         const missing = await parseMissingKeys(response);
@@ -192,7 +193,7 @@ export function LiveDebatePage() {
     if (!clarifyQuestion.trim() || !id) return;
 
     try {
-      await fetch(`/api/debates/${id}/turns`, {
+      await fetch(apiUrl(`/api/debates/${id}/turns`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: clarifyQuestion, isModerator: true }),
@@ -208,7 +209,7 @@ export function LiveDebatePage() {
     if (!id) return;
     
     try {
-      const response = await fetch(`/api/debates/${id}/complete`, { method: 'POST' });
+      const response = await fetch(apiUrl(`/api/debates/${id}/complete`), { method: 'POST' });
       const data = await response.json();
       navigate(`/synthesis/${data.id}`);
     } catch (error) {

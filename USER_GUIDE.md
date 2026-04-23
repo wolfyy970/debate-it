@@ -28,7 +28,7 @@ cp example.env .env
 | `KIMI_API_KEY` | Yes* | — | Kimi/Moonshot direct API key |
 | `TAVILY_API_KEY` | Yes | — | Tavily search API. Required — agents must be able to search the web. |
 | `PORT` | No | 3001 | Server port |
-| `VITE_API_URL` | No | http://localhost:3001 | Frontend API URL |
+| `VITE_API_URL` | No | _(empty)_ | If set, the browser calls this origin for `/api/...` and SSE (e.g. Vite on :5173, API on :3001). Omit for same-origin or dev proxy. |
 
 *At least one LLM API key required, plus `TAVILY_API_KEY`. If either is missing the app routes to an error screen instead of starting a debate.
 
